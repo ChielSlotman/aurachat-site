@@ -12,7 +12,7 @@ The site includes:
 - **404.html** – Basic not found page.
 - **config.js** – Central place to set your backend base URL, checkout exchange path, Stripe keys and support email.
 - **styles.css** – Dark theme with neon gradients, matching your extension UI.
-- **img/** – Contains your logo and banner images.
+- **logo/** – Contains your logo and banner images.
 
 ## Set up
 

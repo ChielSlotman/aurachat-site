@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AuraChat — Pricing</title>
+  <link rel="stylesheet" href="styles.css">
+  <script async src="https://js.stripe.com/v3/pricing-table.js"></script>
+</head>
+<body>
+<nav>
+  <div class="brand">
+    <img src="img/icon_only.png" alt="AuraChat logo">
+    <div class="name">AuraChat</div>
+  </div>
+  <div class="links">
+    <a href="index.html">Home</a>
+    <a href="faq.html">FAQ</a>
+    <a href="support.html">Support</a>
+  </div>
+</nav>
+<section class="hero">
+  <h1>Choose your plan</h1>
+  <p>Pay on our secure Stripe checkout. After payment you will land on the success page where you get your activation code.</p>
+</section>
+<section class="features">
+  <div class="grid">
+    <div class="card">
+      <h3>Free</h3>
+      <ul>
+        <li>One floating image</li>
+        <li>Custom upload</li>
+        <li>Works on any chat page</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Premium</h3>
+      <ul>
+        <li>Unlimited avatars</li>
+        <li>Extra visual and audio effects</li>
+        <li>Priority image pipeline</li>
+      </ul>
+      <p><em>Billing managed by Stripe. You can cancel anytime in the portal.</em></p>
+    </div>
+  </div>
+  <div style="text-align:center; margin-top: 2rem;">
+    <div id="stripe-pricing-table">
+      <!-- Stripe Pricing Table will be inserted here when config.js is set -->
+    </div>
+    <p style="opacity:0.8; font-size:0.85rem;">If you don't see the pricing table, edit <code>config.js</code> with your Stripe details.</p>
+  </div>
+</section>
+<footer>
+  AuraChat © 2025. Not affiliated with Character.AI.
+</footer>
+<script src="config.js"></script>
+<script>
+  const cfg = window.AURACHAT_CONFIG || {};
+  if (cfg.STRIPE_PUBLISHABLE_KEY && cfg.STRIPE_PRICING_TABLE_ID) {
+    const el = document.createElement('stripe-pricing-table');
+    el.setAttribute('publishable-key', cfg.STRIPE_PUBLISHABLE_KEY);
+    el.setAttribute('pricing-table-id', cfg.STRIPE_PRICING_TABLE_ID);
+    document.getElementById('stripe-pricing-table').appendChild(el);
+  }
+</script>
+</body>
+</html>

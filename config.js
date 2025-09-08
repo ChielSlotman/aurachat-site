@@ -1,0 +1,16 @@
+// AuraChat Website Config
+// Update these values to match your backend and Stripe configuration
+window.AURACHAT_CONFIG = {
+  // Base URL of your backend (no trailing slash)
+  BACKEND_BASE: "https://YOUR-BACKEND.onrender.com",
+  // Path to exchange a Checkout Session for an activation code
+  EXCHANGE_PATH: "/exchange-session",
+  // Link to your Stripe customer portal (optional)
+  PORTAL_URL: "https://billing.stripe.com/p/YOUR-CUSTOMER-PORTAL-LINK",
+  // Stripe publishable key (required for the pricing table)
+  STRIPE_PUBLISHABLE_KEY: "pk_test_replace_me",
+  // ID of your Stripe Pricing Table
+  STRIPE_PRICING_TABLE_ID: "prctbl_replace_me",
+  // Email address users should contact for support
+  CONTACT_EMAIL: "support@example.com"
+};

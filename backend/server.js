@@ -1,6 +1,6 @@
 // Minimal AuraSync backend: redeem codes and check premium status
 const express = require('express');
-const cors = require('cors');
+// Note: using a custom CORS handler to meet exact policy requirements
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
@@ -16,6 +16,7 @@ const ALLOW_ORIGINS = (process.env.ALLOW_ORIGINS || '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
 
 // --- Simple JSON "DB" helpers ---
 async function ensureStore() {
@@ -35,32 +36,47 @@ async function writeStore(store) {
   await fs.writeFile(STORE_FILE, JSON.stringify(store, null, 2));
 }
 
-// --- CORS configuration ---
-function originMatches(origin, pattern) {
-  if (pattern === origin) return true;
-  if (pattern.endsWith(':*')) {
-    const base = pattern.slice(0, -1);
-    if (origin.startsWith(base)) return true;
-  }
-  if (pattern.startsWith('chrome-extension://')) {
-    return origin === pattern;
-  }
-  return false;
-}
+// --- CORS configuration (custom) ---
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '';
 
-const corsOptions =
-  ALLOW_ORIGINS.length === 0
-    ? { origin: true, credentials: true }
-    : {
-        origin: (origin, callback) => {
-          if (!origin) return callback(null, true);
-          const ok = ALLOW_ORIGINS.some((p) => originMatches(origin, p));
-          return callback(ok ? null : new Error('Not allowed by CORS'), ok);
-        },
-        credentials: true,
-      };
+  let allowed = false;
+  if (CORS_HAS_WILDCARD) {
+    allowed = true;
+  } else if (!origin) {
+    // Allow requests without Origin header (extensions/native/curl)
+    allowed = true;
+  } else if (ALLOW_ORIGINS.length === 0) {
+    // No list provided -> allow all during early testing
+    allowed = true;
+  } else if (ALLOW_ORIGINS.includes(origin)) {
+    // Exact match including chrome-extension://<ID>
+    allowed = true;
+  }
 
-app.use(cors(corsOptions));
+  // Log decision
+  console.log(`[CORS] Origin: ${origin || '(none)'} => ${allowed ? 'allowed' : 'denied'}`);
+
+  // Apply headers if allowed
+  if (allowed) {
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Origin', CORS_HAS_WILDCARD ? '*' : (origin || '*'));
+  }
+
+  // Always handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  if (!allowed) {
+    return res.status(403).json({ error: 'Not allowed by CORS' });
+  }
+
+  next();
+});
 
 // --- Routes ---
 app.get('/health', (req, res) => {
@@ -117,9 +133,11 @@ app.get('/status', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`AuraSync backend running on http://localhost:${PORT}`);
-  if (ALLOW_ORIGINS.length === 0) {
-    console.log('CORS: allowing all origins (dev). Set ALLOW_ORIGINS to restrict.');
+  if (CORS_HAS_WILDCARD) {
+    console.log('CORS: wildcard * active (allowing all origins).');
+  } else if (ALLOW_ORIGINS.length === 0) {
+    console.log('CORS: ALLOW_ORIGINS not set -> allowing all (dev).');
   } else {
-    console.log('CORS allow list:', ALLOW_ORIGINS);
+    console.log('CORS allow list (exact match):', ALLOW_ORIGINS);
   }
 });

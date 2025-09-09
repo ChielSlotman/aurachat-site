@@ -1,6 +1,6 @@
 // AuraChat Website Config
 // Update these values to match your backend and Stripe configuration
-window.AURACHAT_CONFIG = {
+window.AURASYNC_CONFIG = {
   // Base URL of your backend (no trailing slash)
   BACKEND_BASE: "https://YOUR-BACKEND.onrender.com",
   // Path to exchange a Checkout Session for an activation code
@@ -17,3 +17,5 @@ window.AURACHAT_CONFIG = {
   // Email address users should contact for support
   CONTACT_EMAIL: "support@example.com"
 };
+// Back-compat for pages still reading AURACHAT_CONFIG
+window.AURACHAT_CONFIG = window.AURASYNC_CONFIG;

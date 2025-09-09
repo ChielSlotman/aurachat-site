@@ -1,6 +1,6 @@
-# AuraChat Website
+# AuraSync Website
 
-This is a simple static site for **AuraChat**, matching the dark neon style of the extension.
+This is a simple static site for **AuraSync**, matching the dark neon style of the extension.
 
 The site includes:
 

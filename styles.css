@@ -8,6 +8,10 @@
   --accent1: #3ce0ff;
   --accent2: #a23cff;
   --accent3: #ff3ca2;
+  /* Extra accents to match the logo's full spectrum */
+  --accentBlue: #2d7eff;
+  --accentIndigo: #7b61ff;
+  --accentPinkLight: #ffa3ff;
   --text: #e6eaff;
   --muted: #8f98c0;
 }
@@ -45,7 +49,15 @@ nav .brand img {
 nav .brand .name {
   font-weight: 700;
   font-size: 1.3rem;
-  background: linear-gradient(90deg, var(--accent1), var(--accent2), var(--accent3));
+  background: linear-gradient(
+    90deg,
+    var(--accent1) 0%,
+    var(--accentBlue) 20%,
+    var(--accentIndigo) 40%,
+    var(--accent2) 60%,
+    var(--accent3) 80%,
+    var(--accentPinkLight) 100%
+  );
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -67,7 +79,15 @@ nav .links a:hover {
   font-size: 2.5rem;
   font-weight: 800;
   margin-bottom: 0.5rem;
-  background: linear-gradient(90deg, var(--accent1), var(--accent2), var(--accent3));
+  background: linear-gradient(
+    90deg,
+    var(--accent1) 0%,
+    var(--accentBlue) 20%,
+    var(--accentIndigo) 40%,
+    var(--accent2) 60%,
+    var(--accent3) 80%,
+    var(--accentPinkLight) 100%
+  );
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -105,7 +125,15 @@ nav .links a:hover {
 .features h2 {
   text-align: center;
   margin-bottom: 1.5rem;
-  background: linear-gradient(90deg, var(--accent1), var(--accent2), var(--accent3));
+  background: linear-gradient(
+    90deg,
+    var(--accent1) 0%,
+    var(--accentBlue) 20%,
+    var(--accentIndigo) 40%,
+    var(--accent2) 60%,
+    var(--accent3) 80%,
+    var(--accentPinkLight) 100%
+  );
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;

@@ -27,9 +27,14 @@ const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
 // --- Database setup (Postgres with in-memory fallback) ---
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
-if (DATABASE_URL) {
-  // Always enable SSL with relaxed verification for hosted providers (e.g., Render, Supabase)
-  pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+if (process.env.DATABASE_URL) {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+  console.info('[DB] using pg (SSL no-verify)');
+} else {
+  console.info('[DB] using in-memory store');
 }
 
 // In-memory fallback store (for local dev when DATABASE_URL is not set)
@@ -405,3 +410,5 @@ app.listen(PORT, () => {
   console.error('Failed to initialize storage:', e);
   process.exit(1);
 });
+
+module.exports = { pool };

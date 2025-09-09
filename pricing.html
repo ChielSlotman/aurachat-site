@@ -48,23 +48,15 @@
   </div>
   <div style="text-align:center; margin-top: 2rem;">
     <div id="stripe-pricing-table">
-      <!-- Stripe Pricing Table will be inserted here when config.js is set -->
+      <stripe-pricing-table
+        pricing-table-id="prctbl_1S4FoI1XlsSTEaa9Xa8LAnIK"
+        publishable-key="pk_test_51S3cea1XlsSTEaa9zu10zIjcwOsdfEN5PYP7EA9AKwFuoIACbPUSfJCIJhAgvRoTnGqP0mRlOYSlqveFHQuXhG6I00gFu6TNbX">
+      </stripe-pricing-table>
     </div>
-    <p style="opacity:0.8; font-size:0.85rem;">If you don't see the pricing table, edit <code>config.js</code> with your Stripe details.</p>
   </div>
 </section>
 <footer>
   AuraChat © 2025. Not affiliated with Character.AI.
 </footer>
-<script src="config.js"></script>
-<script>
-  const cfg = window.AURACHAT_CONFIG || {};
-  if (cfg.STRIPE_PUBLISHABLE_KEY && cfg.STRIPE_PRICING_TABLE_ID) {
-    const el = document.createElement('stripe-pricing-table');
-    el.setAttribute('publishable-key', cfg.STRIPE_PUBLISHABLE_KEY);
-    el.setAttribute('pricing-table-id', cfg.STRIPE_PRICING_TABLE_ID);
-    document.getElementById('stripe-pricing-table').appendChild(el);
-  }
-</script>
 </body>
 </html>

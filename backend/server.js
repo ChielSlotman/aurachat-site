@@ -1,3 +1,4 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 // Minimal AuraSync backend: redeem codes and check premium status
 const express = require('express');
 // Note: using a custom CORS handler to meet exact policy requirements
@@ -23,6 +24,7 @@ const ALLOW_ORIGINS = (process.env.ALLOW_ORIGINS || '')
   .map((s) => s.trim())
   .filter(Boolean);
 const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
+console.info('[ENV] DATABASE_URL set?', !!process.env.DATABASE_URL);
 
 // --- Database setup (Postgres with in-memory fallback) ---
 const DATABASE_URL = process.env.DATABASE_URL || '';

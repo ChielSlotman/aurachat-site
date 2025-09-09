@@ -178,7 +178,12 @@ app.post('/admin/create-codes', async (req, res) => {
   const store = await readStore();
   const codes = [];
   for (let i = 0; i < n; ++i) {
-    const code = 'AURASYNC-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    // Generate codes like DEMO-AURASYNC-#### where #### is a zero-padded 4-digit number
+    let code;
+    do {
+      const num = Math.floor(Math.random() * 10000);
+      code = `DEMO-AURASYNC-${String(num).padStart(4, '0')}`;
+    } while (store.codes[code]); // ensure uniqueness within current store
     store.codes[code] = { redeemed: false, note: note || '', createdAt: now() };
     codes.push(code);
   }

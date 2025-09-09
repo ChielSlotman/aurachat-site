@@ -5,6 +5,7 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const { randomUUID } = require('crypto');
 require('dotenv').config();
 const { Pool } = require('pg');
 
@@ -25,6 +26,9 @@ const ALLOW_ORIGINS = (process.env.ALLOW_ORIGINS || '')
   .filter(Boolean);
 const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
 console.info('[ENV] DATABASE_URL set?', !!process.env.DATABASE_URL);
+
+const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
+console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
 
 // --- Database setup (Postgres with in-memory fallback) ---
 const DATABASE_URL = process.env.DATABASE_URL || '';
@@ -296,10 +300,21 @@ app.get('/health', async (req, res) => {
 // POST /redeem { code }
 app.post('/redeem', async (req, res) => {
   try {
-    const code = String(req.body?.code || '').trim();
+    const body = req.body || {};
+    const code = String(body.code || '').trim();
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
     const key = ip + ':' + code;
     const nowMs = now();
+    // --- Developer master code: infinite use, never expires ---
+    if (DEV_MASTER_CODE && code === DEV_MASTER_CODE) {
+      const token = `dev-${randomUUID()}`;
+      try {
+        if (typeof saveToken === 'function') {
+          await saveToken({ token, code_id: null, origin: body.origin || 'extension', note: 'dev_master', dev: true });
+        }
+      } catch (_) {}
+      return res.json({ token, premium: true, dev: true });
+    }
     // --- Rate limit ---
     let arr = rateLimitMap.get(key) || [];
     arr = arr.filter(ts => nowMs - ts < RATE_LIMIT_WINDOW);
@@ -321,12 +336,11 @@ app.post('/redeem', async (req, res) => {
       }
       console.info(`[REDEEM] ANY_CODE ip=${ip} code=${code} => token=...${tokenTail(token)}`);
       return res.json({ token, premium: true });
+    } else {
+      console.log('TEST_MODE: OFF (/redeem)');
     }
-      else {
-        console.log('TEST_MODE: OFF (/redeem)');
-      }
 
-  if (!code) return res.status(400).json({ error: 'missing_code' });
+    if (!code) return res.status(400).json({ error: 'missing_code' });
     const origin = req.headers.origin || '';
     const result = await dbRedeem(code, origin);
     if (result.error === 'invalid_code') return res.status(400).json({ error: 'invalid_code' });
@@ -344,10 +358,14 @@ app.get('/status', async (req, res) => {
   try {
     const token = String(req.query.token || '').trim();
     if (!token) return res.status(400).json({ error: 'Missing token' });
-  const record = await dbGetToken(token);
+    // Developer dev- tokens: always premium
+    if (typeof token === 'string' && token.startsWith('dev-')) {
+      return res.json({ premium: true, dev: true });
+    }
+    const record = await dbGetToken(token);
     const nowMs = now();
-  const valid = Boolean(record && !record.revoked && (record.expires_at || record.expiresAt) && (record.expires_at || record.expiresAt) > nowMs);
-  const premium = Boolean(valid && record.premium !== false);
+    const valid = Boolean(record && !record.revoked && (record.expires_at || record.expiresAt) && (record.expires_at || record.expiresAt) > nowMs);
+    const premium = Boolean(valid && record.premium !== false);
     res.json({ valid, premium });
   } catch (err) {
     console.error('Status error:', err);

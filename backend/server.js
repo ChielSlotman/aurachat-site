@@ -117,12 +117,15 @@ app.post('/redeem', async (req, res) => {
       console.info(`[REDEEM] ANY_CODE ip=${ip} code=${code} => token=...${tokenTail(token)}`);
       return res.json({ token, premium: true });
     }
+      else {
+        console.log('TEST_MODE: OFF (/redeem)');
+      }
 
-    if (!code) return res.status(400).json({ error: 'Missing code' });
+  if (!code) return res.status(400).json({ error: 'missing_code' });
 
     const entry = store.codes[code];
-    if (!entry) return res.status(400).json({ error: 'Invalid code' });
-    if (entry.redeemed) return res.status(409).json({ error: 'Code already redeemed' });
+  if (!entry) return res.status(400).json({ error: 'invalid_code' });
+  if (entry.redeemed) return res.status(409).json({ error: 'already_redeemed' });
 
     const token = crypto.randomUUID();
     const expiresAt = nowMs + TOKEN_LIFETIME_MS;
@@ -219,5 +222,10 @@ app.listen(PORT, () => {
     console.log('CORS: ALLOW_ORIGINS not set -> allowing all (dev).');
   } else {
     console.log('CORS allow list (exact match):', ALLOW_ORIGINS);
+  }
+  if (!ACCEPT_ANY_CODE) {
+    console.log('TEST_MODE: OFF');
+  } else {
+    console.log('TEST_MODE: ON');
   }
 });

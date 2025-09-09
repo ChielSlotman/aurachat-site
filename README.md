@@ -18,6 +18,7 @@ The site includes:
 
 1. **Edit `config.js`**
    Fill in your backend URL, exchange path, Stripe publishable key, Stripe Pricing Table ID and support email.
+   - To enable the Manage Billing button on `pricing.html`, either set `PORTAL_URL` to your Stripe Customer Portal shareable link, or provide `BACKEND_BASE` and `PORTAL_SESSION_PATH` for a server endpoint that creates a portal session and returns `{ url }`.
 
 2. **Deploy to GitHub Pages**
    - Create a new repository and upload these files.

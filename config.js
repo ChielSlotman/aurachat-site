@@ -7,6 +7,9 @@ window.AURACHAT_CONFIG = {
   EXCHANGE_PATH: "/exchange-session",
   // Link to your Stripe customer portal (optional)
   PORTAL_URL: "https://billing.stripe.com/p/YOUR-CUSTOMER-PORTAL-LINK",
+  // Optional: Backend path that creates a Stripe Billing Portal session and returns { url }
+  // Example implementation: POST BACKEND_BASE + PORTAL_SESSION_PATH -> { url: "https://billing.stripe.com/session/..." }
+  PORTAL_SESSION_PATH: "/create-portal-session",
   // Stripe publishable key (required for the pricing table)
   STRIPE_PUBLISHABLE_KEY: "pk_test_replace_me",
   // ID of your Stripe Pricing Table

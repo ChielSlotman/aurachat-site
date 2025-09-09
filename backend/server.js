@@ -28,7 +28,8 @@ const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
 if (DATABASE_URL) {
-  pool = new Pool({ connectionString: DATABASE_URL, ssl: DATABASE_URL.includes('render.com') ? { rejectUnauthorized: false } : undefined });
+  // Always enable SSL with relaxed verification for hosted providers (e.g., Render, Supabase)
+  pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 }
 
 // In-memory fallback store (for local dev when DATABASE_URL is not set)
@@ -386,6 +387,7 @@ app.post('/admin/revoke-token', async (req, res) => {
 initStorage().then(() => {
 app.listen(PORT, () => {
   console.log(`AuraSync backend running on http://localhost:${PORT}`);
+  console.log('Storage:', pool ? 'pg' : 'memory');
   if (CORS_HAS_WILDCARD) {
     console.log('CORS: wildcard * active (allowing all origins).');
   } else if (ALLOW_ORIGINS.length === 0) {

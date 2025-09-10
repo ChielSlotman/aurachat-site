@@ -191,6 +191,26 @@ nav .links a:focus-visible::after {
 .features {
   padding: 2rem;
 }
+.pricing-embed {
+  position: relative;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 12px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+.pricing-embed stripe-pricing-table {
+  display: block;
+}
+.pricing-vignette {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 140% at 50% 0%, rgba(5,8,15,0) 40%, rgba(5,8,15,0.4) 80%, rgba(5,8,15,0.7) 100%);
+}
 .features h2 {
   text-align: center;
   margin-bottom: 1.5rem;

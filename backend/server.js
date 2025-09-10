@@ -8,8 +8,12 @@ const crypto = require('crypto');
 const { randomUUID } = require('crypto');
 require('dotenv').config();
 const { Pool } = require('pg');
+const Stripe = require('stripe');
+const sgMail = require('@sendgrid/mail');
 
 const app = express();
+// Use raw body for Stripe webhooks
+app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 const PORT = Number(process.env.PORT || 8787);
@@ -31,6 +35,14 @@ for (const reqOrigin of ['https://api.aurasync.info', 'chrome-extension://*']) {
 const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
 const CORS_HAS_EXT_WILDCARD = ALLOW_ORIGINS.includes('chrome-extension://*');
 console.info('[ENV] DATABASE_URL set?', !!process.env.DATABASE_URL);
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
+const FROM_EMAIL = process.env.FROM_EMAIL || '';
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+}
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
 console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
@@ -197,6 +209,52 @@ async function dbRevokeToken(tokenStr) {
   }
 }
 
+async function dbRevokeTokensByEmail(email) {
+  if (pool) {
+    await pool.query('UPDATE tokens SET revoked=TRUE WHERE code_id IN (SELECT id FROM codes WHERE note=$1)', [email]);
+  } else {
+    for (const [tok, t] of mem.tokens.entries()) {
+      const c = [...mem.codes.values()].find(c => c.id === t.code_id);
+      if (c && c.note === email) t.revoked = true;
+    }
+  }
+}
+
+async function dbLatestCodeForEmail(email) {
+  if (pool) {
+    const { rows } = await pool.query('SELECT * FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 1', [email]);
+    return rows[0] || null;
+  } else {
+    const list = [...mem.codes.values()].filter(c => c.note === email).sort((a,b)=> (b.created_at||0)-(a.created_at||0));
+    return list[0] || null;
+  }
+}
+
+async function dbRevokeTokensByCodeId(codeId) {
+  if (pool) {
+    await pool.query('UPDATE tokens SET revoked=TRUE WHERE code_id=$1', [codeId]);
+  } else {
+    for (const [, t] of mem.tokens.entries()) {
+      if (t.code_id === codeId) t.revoked = true;
+    }
+  }
+}
+
+async function sendCodeEmail(to, code) {
+  if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+    console.warn('[EMAIL] Missing SENDGRID_API_KEY or FROM_EMAIL; skipping send');
+    return;
+  }
+  const msg = {
+    to,
+    from: FROM_EMAIL,
+    subject: 'Your AuraSync activation code',
+    text: `Your activation code: ${code}`,
+    html: `<p>Your activation code:</p><pre style="font-size:18px">${code}</pre>`
+  };
+  try { await sgMail.send(msg); } catch (e) { console.error('[EMAIL] send error', e?.response?.body || e); }
+}
+
 async function dbListCodes() {
   if (pool) {
     const q = `
@@ -305,6 +363,52 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// --- Stripe webhook ---
+app.post('/webhook', async (req, res) => {
+  try {
+    let event = null;
+    const sig = req.headers['stripe-signature'];
+    if (STRIPE_WEBHOOK_SECRET && stripe) {
+      try {
+        event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+      } catch (err) {
+        console.error('Webhook signature verification failed:', err?.message);
+        return res.status(400).send('Bad signature');
+      }
+    } else {
+      // Fallback (dev): parse JSON directly
+      event = JSON.parse(req.body.toString('utf8'));
+    }
+
+    const type = event.type;
+    const obj = event.data?.object || {};
+    // Resolve email
+    let email = obj.customer_email || obj.customer_details?.email || obj.receipt_email || '';
+    if (!email && stripe && obj.customer) {
+      try { const cust = await stripe.customers.retrieve(obj.customer); email = cust?.email || email; } catch {}
+    }
+
+    if ((type === 'checkout.session.completed' || type === 'invoice.paid') && email) {
+      const codes = await dbCreateCodes(1, email);
+      const code = codes[0];
+      console.info(`[WH] ${type} -> issued code for ${email}`);
+      await sendCodeEmail(email, code);
+    }
+
+    if (type === 'customer.subscription.deleted') {
+      if (email) {
+        await dbRevokeTokensByEmail(email);
+        console.info(`[WH] subscription deleted -> revoked tokens for ${email}`);
+      }
+    }
+
+    res.json({ received: true });
+  } catch (e) {
+    console.error('Webhook error:', e);
+    res.status(500).end();
+  }
+});
+
 // POST /redeem { code }
 app.post('/redeem', async (req, res) => {
   try {
@@ -378,6 +482,41 @@ app.get('/status', async (req, res) => {
   } catch (err) {
     console.error('Status error:', err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Regenerate code for a customer (admin protected) ---
+app.post('/regenerate', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'missing_email' });
+    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+
+    // Verify subscription active
+    let customerId = null;
+    const customers = await stripe.customers.list({ email, limit: 1 });
+    if (customers?.data?.length) customerId = customers.data[0].id;
+    if (!customerId) return res.status(404).json({ error: 'customer_not_found' });
+    const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
+    if (!subs?.data?.length) return res.status(403).json({ error: 'subscription_not_active' });
+
+    // Check last code age > 7 days
+    const last = await dbLatestCodeForEmail(email);
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    if (last && last.created_at && Date.now() - Number(last.created_at) <= sevenDays) {
+      return res.status(429).json({ error: 'too_soon' });
+    }
+
+    // Generate and revoke old
+    const codes = await dbCreateCodes(1, email);
+    const code = codes[0];
+    if (last && last.id) await dbRevokeTokensByCodeId(last.id);
+    await sendCodeEmail(email, code);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Regenerate error:', e);
+    res.status(500).json({ error: 'server_error' });
   }
 });
 

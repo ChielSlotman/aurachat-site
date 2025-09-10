@@ -9,3 +9,110 @@
 .btn-secondary{background:rgba(255,255,255,0.08); color:#fff}
 .btn-plain{background:transparent; color:#fff}
 .card{border:1px solid rgba(255,255,255,0.1); border-radius:1rem; background:rgba(255,255,255,0.06); box-shadow:0 10px 30px rgba(0,0,0,0.3); backdrop-filter: blur(10px)}
+
+/* --- Lightweight utilities to mimic used Tailwind classes --- */
+/* Layout */
+.flex{display:flex}
+.inline-flex{display:inline-flex}
+.items-center{align-items:center}
+.justify-between{justify-content:space-between}
+.grid{display:grid}
+.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}
+.gap-4{gap:1rem}
+.gap-8{gap:2rem}
+.hidden{display:none}
+.sticky{position:sticky}
+.top-0{top:0}
+.z-40{z-index:40}
+
+/* Responsive variants */
+@media (min-width:640px){
+  .sm\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (min-width:768px){
+  .md\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .md\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .md\:flex{display:flex}
+  .md\:hidden{display:none}
+  .md\:py-24{padding-top:6rem; padding-bottom:6rem}
+  .md\:text-4xl{font-size:2.25rem; line-height:2.5rem}
+  .md\:text-5xl{font-size:3rem; line-height:1}
+}
+
+/* Spacing */
+.py-3{padding-top:.75rem; padding-bottom:.75rem}
+.py-16{padding-top:4rem; padding-bottom:4rem}
+.py-24{padding-top:6rem; padding-bottom:6rem}
+.p-3{padding:.75rem}
+.p-5{padding:1.25rem}
+.p-6{padding:1.5rem}
+.mt-1{margin-top:.25rem}
+.mt-2{margin-top:.5rem}
+.mt-3{margin-top:.75rem}
+.mt-4{margin-top:1rem}
+.mt-6{margin-top:1.5rem}
+.mt-8{margin-top:2rem}
+.mb-3{margin-bottom:.75rem}
+.ml-3{margin-left:.75rem}
+
+/* Typography */
+.text-xs{font-size:.75rem; line-height:1rem}
+.text-sm{font-size:.875rem; line-height:1.25rem}
+.text-lg{font-size:1.125rem; line-height:1.75rem}
+.text-3xl{font-size:1.875rem; line-height:2.25rem}
+.text-4xl{font-size:2.25rem; line-height:2.5rem}
+.text-5xl{font-size:3rem; line-height:1}
+.font-semibold{font-weight:600}
+.text-white{color:#fff}
+.text-slate-100{color:#f1f5f9}
+.text-slate-300{color:#cbd5e1}
+.text-slate-400{color:#94a3b8}
+
+/* Colors and backgrounds */
+.bg-black{background-color:#000}
+.bg-black\/60{background-color:rgba(0,0,0,0.6)}
+.bg-black\/70{background-color:rgba(0,0,0,0.7)}
+.bg-black\/80{background-color:rgba(0,0,0,0.8)}
+.border{border-width:1px}
+.border-b{border-bottom-width:1px}
+.border-t{border-top-width:1px}
+.border-white\/10{border-color:rgba(255,255,255,0.1)}
+.hover\:text-white:hover{color:#fff}
+
+/* Radius & sizing */
+.rounded{border-radius:.5rem}
+.rounded-lg{border-radius:.75rem}
+.w-10{width:2.5rem}
+.h-10{height:2.5rem}
+.w-8{width:2rem}
+.h-8{height:2rem}
+.w-6{width:1.5rem}
+.h-6{height:1.5rem}
+
+/* Effects */
+.backdrop-blur-md{backdrop-filter:blur(8px)}
+
+/* Buttons */
+.btn{display:inline-flex; align-items:center; justify-content:center; padding:.625rem 1rem; border-radius:.5rem; border:1px solid rgba(255,255,255,0.12); background:linear-gradient(90deg,#6366f1,#8b5cf6); color:#fff; text-decoration:none}
+.btn:hover{filter:brightness(1.07)}
+.btn-secondary{display:inline-flex; align-items:center; justify-content:center; padding:.625rem 1rem; border-radius:.5rem; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.08); color:#fff; text-decoration:none}
+
+/* Prose */
+.prose{line-height:1.7}
+.prose h2{margin-top:1.25rem; font-size:1.125rem}
+.prose p{margin-top:.75rem}
+.prose-invert{color:#cbd5e1}
+.prose-invert h2{color:#f1f5f9}
+
+/* Footer list cleanup */
+footer ul{list-style:none; padding-left:0; margin:0}
+footer li{margin:0}
+
+/* FAQ details styling */
+details{border-radius:.75rem; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05)}
+details > summary{cursor:pointer; list-style:none}
+details > summary::-webkit-details-marker{display:none}
+details > summary{position:relative; padding-left:1.25rem}
+details > summary::before{content:"▸"; position:absolute; left:.25rem; color:#94a3b8}
+details[open] > summary::before{content:"▾"}
+.space-y-2 > * + *{margin-top:.5rem}

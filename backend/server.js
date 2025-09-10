@@ -6,7 +6,7 @@ const rateLimit = require('express-rate-limit');
 const pino = require('pino');
 const { z } = require('zod');
 // Note: using a custom CORS handler to meet exact policy requirements
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { randomUUID } = require('crypto');
@@ -117,26 +117,28 @@ const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
 console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
 
 // --- Database setup (Postgres with in-memory fallback) ---
+// Synchronous SSL helper (CommonJS friendly, no top-level await)
+function getPgSsl() {
+  if (String(process.env.PG_SSL_INSECURE || '').toLowerCase() === 'true') {
+    console.warn('[DB] PG SSL INSECURE MODE ENABLED (temporary)');
+    return { rejectUnauthorized: false };
+  }
+  if (process.env.PG_CA_BUNDLE) {
+    return { ca: process.env.PG_CA_BUNDLE };
+  }
+  const caPath = process.env.PGSSLROOTCERT || path.join(__dirname, 'certs', 'db-ca.pem');
+  try {
+    const ca = fs.readFileSync(caPath, 'utf8');
+    return { ca };
+  } catch (e) {
+    console.warn('[DB] CA load failed; using system trust store. Msg:', e && e.message);
+    return true; // Use system CAs (secure)
+  }
+}
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
 if (process.env.DATABASE_URL) {
-  // Secure SSL with CA by default; optional insecure flag for temporary hotfixes
-  const insecure = String(process.env.PG_SSL_INSECURE || '').toLowerCase() === 'true';
-  let ssl = undefined;
-  if (insecure) {
-    ssl = { rejectUnauthorized: false };
-    console.warn('[DB] PG SSL INSECURE MODE ENABLED (temporary)');
-  } else {
-    try {
-      const caPath = process.env.PGSSLROOTCERT || path.join(__dirname, 'certs', 'db-ca.pem');
-      const ca = await fs.readFile(caPath, 'utf8');
-      ssl = { ca };
-    } catch (e) {
-      console.warn('[DB] CA load failed; falling back to default SSL verify:', e?.message);
-      ssl = { rejectUnauthorized: true };
-    }
-  }
-  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl });
+  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: getPgSsl() });
   console.info('[DB] using pg with SSL');
 } else {
   console.info('[DB] using in-memory store');

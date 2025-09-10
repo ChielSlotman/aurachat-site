@@ -120,12 +120,24 @@ console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
 if (process.env.DATABASE_URL) {
-  const ssl = (process.env.NODE_ENV === 'production') ? { rejectUnauthorized: true } : { rejectUnauthorized: false };
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl
-  });
-  console.info('[DB] using pg');
+  // Secure SSL with CA by default; optional insecure flag for temporary hotfixes
+  const insecure = String(process.env.PG_SSL_INSECURE || '').toLowerCase() === 'true';
+  let ssl = undefined;
+  if (insecure) {
+    ssl = { rejectUnauthorized: false };
+    console.warn('[DB] PG SSL INSECURE MODE ENABLED (temporary)');
+  } else {
+    try {
+      const caPath = process.env.PGSSLROOTCERT || path.join(__dirname, 'certs', 'db-ca.pem');
+      const ca = await fs.readFile(caPath, 'utf8');
+      ssl = { ca };
+    } catch (e) {
+      console.warn('[DB] CA load failed; falling back to default SSL verify:', e?.message);
+      ssl = { rejectUnauthorized: true };
+    }
+  }
+  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl });
+  console.info('[DB] using pg with SSL');
 } else {
   console.info('[DB] using in-memory store');
 }

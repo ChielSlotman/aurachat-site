@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AuraSync Premium Activated</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/logo/icon_only.png">
+  <link rel="canonical" href="https://aurasync.info/success/">
+  <link rel="stylesheet" href="/styles.css?v=2025-09-10-2">
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">
+    <img src="/logo/icon_only.png" alt="AuraSync logo" width="32" height="32" loading="lazy">
+    <div class="name">AuraSync</div>
+  </a>
+  <div class="links">
+    <a href="/">Home</a>
+    <a href="/support/">Support</a>
+  </div>
+</nav>
+<section class="hero">
+  <h1>AuraSync Premium Activated</h1>
+  <p id="lead">Checking your payment…</p>
+</section>
+<section class="features">
+  <div class="card" style="max-width:640px; margin-left:auto; margin-right:auto;">
+    <div id="spinner" class="spinner" aria-live="polite" style="display:none"></div>
+    <div id="result" style="display:none"></div>
+    <div id="actions" style="margin-top:12px; display:flex; gap:8px;"></div>
+  </div>
+</section>
+<footer>
+  AuraSync © 2025. Not affiliated with Character.AI.
+</footer>
+<script>
+function getParam(name){try{const u=new URL(window.location.href);return u.searchParams.get(name);}catch{return null}}
+function el(id){return document.getElementById(id)}
+function showSpinner(on){el('spinner').style.display=on?'block':'none'}
+function setLead(txt){el('lead').textContent=txt}
+async function activate(){
+  const sid=getParam('session_id');
+  const actions=el('actions');
+  actions.innerHTML='';
+  if(!sid){
+    setLead('We could not detect your session. Click “Back to pricing” and try again.');
+    el('result').style.display='none';
+    const back=document.createElement('a');
+    back.href='/pricing/';
+    back.className='btn';
+    back.textContent='Back to pricing';
+    actions.appendChild(back);
+    return;
+  }
+  showSpinner(true);
+  setLead('Checking your payment…');
+  try{
+    const res=await fetch('https://api.aurasync.info/activate',{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sid})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||!data||!data.code){
+      throw new Error(data?.message||'not_verified');
+    }
+    const code=(data.code||'').trim();
+    const email=(data.email||'').trim();
+    el('result').style.display='block';
+    el('result').innerHTML=`Here is your activation code: <strong>${code}</strong>. We also sent it to <strong>${email}</strong>. Open the extension and paste the code.`;
+    setLead('');
+    actions.innerHTML='';
+  }catch(e){
+    setLead('We could not verify your purchase yet. Please wait 30 seconds and refresh. If it persists, contact support.');
+    const retry=document.createElement('button');
+    retry.className='btn';
+    retry.textContent='Retry';
+    retry.onclick=activate;
+    actions.innerHTML='';
+    actions.appendChild(retry);
+  }finally{
+    showSpinner(false);
+  }
+}
+activate();
+</script>
+</body>
+</html>

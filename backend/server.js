@@ -30,7 +30,7 @@ let ALLOW_ORIGINS = (process.env.ALLOW_ORIGINS || '')
   .map((s) => s.trim())
   .filter(Boolean);
 // Ensure required origins are present (non-destructive; preserves *)
-for (const reqOrigin of ['https://api.aurasync.info', 'chrome-extension://*']) {
+for (const reqOrigin of ['https://api.aurasync.info', 'https://aurasync.info', 'chrome-extension://*']) {
   if (!ALLOW_ORIGINS.includes(reqOrigin)) ALLOW_ORIGINS.push(reqOrigin);
 }
 const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
@@ -469,11 +469,13 @@ app.post('/webhook', async (req, res) => {
       try { const cust = await stripe.customers.retrieve(obj.customer); email = cust?.email || email; } catch {}
     }
 
-    if ((type === 'checkout.session.completed' || type === 'invoice.paid') && email) {
-  const codes = await dbCreateCodes(1, email);
-  const code = codes[0];
-  console.info(`[WH] ${type} -> issued code for ${email}`);
-  await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
+    if (type === 'checkout.session.completed' && email) {
+      const codes = await dbCreateCodes(1, email);
+      const code = codes[0];
+      console.info(`[WH] ${type} -> issued code for ${email}`);
+      await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
+    } else if (type === 'invoice.paid') {
+      console.info(`[WH] invoice.paid for ${email || 'unknown'} -> no code issued`);
     }
 
     if (type === 'customer.subscription.deleted') {
@@ -504,6 +506,48 @@ app.post('/create-checkout-session', async (req, res) => {
     return res.json({ id: session.id, url: session.url });
   } catch (e) {
     console.error('Create checkout session error:', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// POST /activate { session_id }
+app.post('/activate', async (req, res) => {
+  try {
+    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
+    const nowMs = now();
+    const key = `activate:${ip}`;
+    let arr = rateLimitMap.get(key) || [];
+    arr = arr.filter(ts => nowMs - ts < RATE_LIMIT_WINDOW);
+    if (arr.length >= RATE_LIMIT_MAX) {
+      return res.status(429).json({ error: 'rate_limited', message: 'Too many attempts. Please wait and try again.' });
+    }
+    arr.push(nowMs);
+    rateLimitMap.set(key, arr);
+
+    const sessionId = String(req.body?.session_id || '').trim();
+    if (!sessionId) return res.status(400).json({ error: 'missing_session_id' });
+    let session;
+    try {
+      session = await stripe.checkout.sessions.retrieve(sessionId);
+    } catch (e) {
+      return res.status(400).json({ error: 'invalid_session', message: 'Could not retrieve session.' });
+    }
+    if (!session || session.payment_status !== 'paid') {
+      return res.status(402).json({ error: 'not_paid', message: 'Payment not completed yet.' });
+    }
+    const email = (session.customer_details?.email || session.customer_email || '').toLowerCase();
+    if (!email) return res.status(400).json({ error: 'missing_email', message: 'No email associated with session.' });
+
+    // Create a new code for this email (revoke older tokens for previous code)
+    const last = await dbLatestCodeForEmail(email);
+    const codes = await dbCreateCodes(1, email);
+    const code = codes[0];
+    if (last && last.id) await dbRevokeTokensByCodeId(last.id);
+
+    return res.json({ code, email });
+  } catch (e) {
+    console.error('Activate error:', e);
     return res.status(500).json({ error: 'server_error' });
   }
 });

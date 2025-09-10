@@ -33,45 +33,11 @@
 publishable-key="pk_live_51S3cea1XlsSTEaa9OUp56ktlczbBBaUNbUxZGmtIzmkI6nzTtUcCHt6ZdjqsQzxB6SqSevlS8SxrcDewYcinl9h500AaMIMEOX">
 </stripe-pricing-table>
   </div>
-    <div style="margin-top:1.5rem;">
-      <a id="manageBillingBtn" class="btn secondary" href="#" style="display:none;">Manage billing</a>
-    </div>
   </div>
 </section>
 <footer>
   AuraSync © 2025. Not affiliated with Character.AI.
 </footer>
-<script src="config.js"></script>
-<script>
-  // Show a Manage Billing button if configured.
-  (function(){
-    const cfg = window.AURACHAT_CONFIG || {};
-    const btn = document.getElementById('manageBillingBtn');
-    if (!btn) return;
-
-    // Preferred: direct portal shareable link configured in Stripe dashboard
-    if (cfg.PORTAL_URL) {
-      btn.href = cfg.PORTAL_URL;
-      btn.style.display = 'inline-block';
-      return;
-    }
-
-    // Optional: backend endpoint that creates a portal session and returns { url }
-    if (cfg.BACKEND_BASE && cfg.PORTAL_SESSION_PATH) {
-      btn.style.display = 'inline-block';
-      btn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try {
-          const res = await fetch(cfg.BACKEND_BASE + cfg.PORTAL_SESSION_PATH, { method: 'POST', credentials: 'include' });
-          const data = await res.json();
-          if (data && data.url) window.location.href = data.url;
-        } catch (err) {
-          console.warn('Could not create portal session');
-        }
-      });
-      return;
-    }
-  })();
-</script>
+ 
 </body>
 </html>

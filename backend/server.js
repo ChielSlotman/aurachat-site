@@ -429,6 +429,21 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// --- debug: stripe mode/account ---
+app.get('/debug/stripe', async (_req, res) => {
+  try {
+    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+    const acct = await stripe.accounts.retrieve();
+    const key = process.env.STRIPE_SECRET_KEY || '';
+    const mode = key.startsWith('sk_live_') ? 'live'
+               : key.startsWith('sk_test_') ? 'test'
+               : 'unknown';
+    res.json({ account_id: acct.id, mode });
+  } catch (e) {
+    res.status(500).json({ error: 'stripe_error', message: String(e.message || e) });
+  }
+});
+
 // --- Stripe webhook ---
 app.post('/webhook', async (req, res) => {
   try {

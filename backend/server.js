@@ -96,6 +96,8 @@ async function initStorage() {
       created_at BIGINT NOT NULL
     );`;
     await pool.query(ddl);
+  // Ensure new columns exist without breaking existing databases
+  await pool.query('ALTER TABLE tokens ADD COLUMN IF NOT EXISTS email TEXT');
     // Seed demo code if not present
     await pool.query('INSERT INTO codes (code, redeemed, created_at) VALUES ($1, FALSE, $2) ON CONFLICT (code) DO NOTHING', ['DEMO-AURASYNC-1234', Date.now()]);
   } else {
@@ -141,7 +143,7 @@ async function dbCreateCodes(n, note) {
   return codes;
 }
 
-async function dbRedeem(codeStr, origin) {
+async function dbRedeem(codeStr, origin, email) {
   const nowMs = Date.now();
   const expiresAt = nowMs + TOKEN_LIFETIME_MS;
   const token = crypto.randomUUID();
@@ -159,7 +161,7 @@ async function dbRedeem(codeStr, origin) {
         await client.query('ROLLBACK');
         return { error: 'already_redeemed' };
       }
-      const insTok = await client.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, code_id) VALUES ($1, TRUE, $2, $3, FALSE, $4) RETURNING id', [token, nowMs, expiresAt, c.id]);
+      const insTok = await client.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, code_id, email) VALUES ($1, TRUE, $2, $3, FALSE, $4, $5) RETURNING id', [token, nowMs, expiresAt, c.id, (email || '').toLowerCase()]);
       const tokId = insTok.rows[0].id;
       await client.query('UPDATE codes SET redeemed=TRUE, redeemed_at=$1, origin=$2 WHERE id=$3', [nowMs, origin || '', c.id]);
       await client.query('INSERT INTO redemptions (code_id, token_id, origin, created_at) VALUES ($1, $2, $3, $4)', [c.id, tokId, origin || '', nowMs]);
@@ -179,7 +181,7 @@ async function dbRedeem(codeStr, origin) {
     c.redeemed_at = nowMs;
     c.origin = origin || '';
     const tokenId = mem.nextId.token++;
-    mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id });
+    mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id, email: (email || '').toLowerCase() });
     const redId = mem.nextId.redemption++;
     mem.redemptions.push({ id: redId, code_id: c.id, token_id: tokenId, origin: origin || '', created_at: nowMs });
     return { token, premium: true };
@@ -241,7 +243,7 @@ async function dbRevokeTokensByCodeId(codeId) {
 async function dbGetCodeByToken(tokenStr) {
   if (pool) {
     const q = `
-      SELECT c.id, c.code, c.note, c.created_at
+      SELECT c.id, c.code, c.note, c.created_at, t.email as token_email
       FROM tokens t
       JOIN codes c ON c.id = t.code_id
       WHERE t.token = $1
@@ -253,7 +255,7 @@ async function dbGetCodeByToken(tokenStr) {
     if (!t) return null;
     for (const c of mem.codes.values()) {
       if (c.id === t.code_id) {
-        return { id: c.id, code: c.code, note: c.note, created_at: c.created_at };
+        return { id: c.id, code: c.code, note: c.note, created_at: c.created_at, token_email: t.email };
       }
     }
     return null;
@@ -313,6 +315,13 @@ async function dbListCodes() {
                ORDER BY t.created_at DESC
                LIMIT 1
              ) AS token_tail
+             (
+               SELECT t.email
+               FROM tokens t
+               WHERE t.code_id = c.id
+               ORDER BY t.created_at DESC
+               LIMIT 1
+             ) AS token_email
       FROM codes c
       ORDER BY c.created_at DESC`;
     const { rows } = await pool.query(q);
@@ -322,6 +331,7 @@ async function dbListCodes() {
       redeemedAt: r.redeemed_at,
       tokenTail: r.token_tail || '',
       note: r.note || '',
+      email: (r.token_email || r.note || ''),
       createdAt: r.created_at,
       origin: r.origin || ''
     }));
@@ -330,8 +340,16 @@ async function dbListCodes() {
     for (const [code, c] of mem.codes.entries()) {
       // find latest token for this code
       let tail = '';
+      let latestTs = -1;
+      let latestEmail = '';
       for (const [tok, t] of mem.tokens.entries()) {
-        if (t.code_id === c.id) tail = tok.slice(-6);
+        if (t.code_id === c.id) {
+          tail = tok.slice(-6);
+          if (typeof t.created_at === 'number' && t.created_at > latestTs) {
+            latestTs = t.created_at;
+            latestEmail = t.email || '';
+          }
+        }
       }
       out.push({
         code,
@@ -339,6 +357,7 @@ async function dbListCodes() {
         redeemedAt: c.redeemed_at,
         tokenTail: tail,
         note: c.note || '',
+        email: latestEmail || c.note || '',
         createdAt: c.created_at,
         origin: c.origin || ''
       });
@@ -483,15 +502,15 @@ app.post('/redeem', async (req, res) => {
     arr.push(nowMs);
     rateLimitMap.set(key, arr);
 
-    if (ACCEPT_ANY_CODE) {
+  if (ACCEPT_ANY_CODE) {
       const token = crypto.randomUUID();
       const expiresAt = nowMs + TOKEN_LIFETIME_MS;
       if (pool) {
         // create a "free" token not linked to a code
-        await pool.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked) VALUES ($1, TRUE, $2, $3, FALSE)', [token, nowMs, expiresAt]);
+    await pool.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, email) VALUES ($1, TRUE, $2, $3, FALSE, $4)', [token, nowMs, expiresAt, String(body.email || '').trim().toLowerCase()]);
       } else {
         const id = mem.nextId.token++;
-        mem.tokens.set(token, { id, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: null });
+    mem.tokens.set(token, { id, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: null, email: String(body.email || '').trim().toLowerCase() });
       }
       console.info(`[REDEEM] ANY_CODE ip=${ip} code=${code} => token=...${tokenTail(token)}`);
       return res.json({ token, premium: true });
@@ -500,8 +519,9 @@ app.post('/redeem', async (req, res) => {
     }
 
     if (!code) return res.status(400).json({ error: 'missing_code' });
-    const origin = req.headers.origin || '';
-    const result = await dbRedeem(code, origin);
+  const origin = req.headers.origin || '';
+  const email = String(body.email || '').trim().toLowerCase();
+  const result = await dbRedeem(code, origin, email);
     if (result.error === 'invalid_code') return res.status(400).json({ error: 'invalid_code' });
     if (result.error === 'already_redeemed') return res.status(409).json({ error: 'already_redeemed' });
     console.info(`[REDEEM] ip=${ip} code=${code} => token=...${tokenTail(result.token)} at ${new Date(nowMs).toISOString()} origin=${origin}`);
@@ -584,11 +604,13 @@ app.post('/lost-code', async (req, res) => {
     if (t.revoked) return res.status(403).json({ error: 'token_revoked' });
     if (!exp || exp <= nowMs) return res.status(403).json({ error: 'token_expired' });
 
-    // Get code associated with token and confirm email matches
-    const codeRow = await dbGetCodeByToken(token);
-    if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
-    const codeEmail = String(codeRow.note || '').toLowerCase();
-    if (codeEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
+  // Get code associated with token and confirm email matches (prefer token.email if captured)
+  const codeRow = await dbGetCodeByToken(token);
+  if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
+  const storedTokenEmail = String(codeRow.token_email || '').toLowerCase();
+  const codeEmail = String(codeRow.note || '').toLowerCase();
+  const expectedEmail = storedTokenEmail || codeEmail;
+  if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
 
     // Verify customer exists and has active subscription
     let customerId = null;

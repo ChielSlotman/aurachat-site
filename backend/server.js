@@ -83,6 +83,10 @@ function validate(schema) {
 }
 
 const ActivateSchema = z.object({ session_id: z.string().min(10).max(200) });
+const RedeemSchema = z.object({
+  email: z.string().email(),
+  code: z.string().min(8).max(200)
+});
 const LostCodeSchema = z.object({ email: z.string().email(), token: z.string().min(10).max(500) });
 
 const PORT = Number(process.env.PORT || 8787);
@@ -170,6 +174,16 @@ async function initStorage() {
     await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS code_hash TEXT");
     await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'");
     await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days')");
+    // Ensure licenses table exists for activation bookkeeping
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS licenses (
+        email TEXT PRIMARY KEY,
+        plan TEXT,
+        active BOOLEAN,
+        activated_at TIMESTAMPTZ
+      )`);
+    // One-active-per-email (using codes.note as email during migration)
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS codes_active_unique ON codes (note) WHERE status = 'active'");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS purchase_events (
         id SERIAL PRIMARY KEY,
@@ -191,6 +205,16 @@ async function initStorage() {
       )`);
     // Seed demo code if not present
     await pool.query('INSERT INTO codes (code, redeemed, created_at) VALUES ($1, FALSE, $2) ON CONFLICT (code) DO NOTHING', ['DEMO-AURASYNC-1234', Date.now()]);
+    // Sanity checks for required columns to avoid runtime 25P02 errors later
+    const sanity = async (table, col) => {
+      const r = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name=$1 AND column_name=$2`, [table, col]);
+      if (!r.rows.length) {
+        console.error(`[SCHEMA] Missing column ${table}.${col}`);
+        process.exit(1);
+      }
+    };
+    await sanity('codes','code_hash');
+    await sanity('codes','status');
   } else {
     // In-memory seed
     if (!mem.codes.has('DEMO-AURASYNC-1234')) {
@@ -232,6 +256,12 @@ async function dbCreateCodes(n, note) {
   return codes;
 }
 
+// Lightweight query helper with error labeling (keeps PII out of logs)
+async function q(client, label, text, params) {
+  try { return await client.query(text, params); }
+  catch (err) { log.error({ label, code: err.code, detail: err.detail }, 'sql_error'); throw err; }
+}
+
 async function dbRedeem(codeStr, origin, email) {
   const nowMs = Date.now();
   const expiresAt = nowMs + TOKEN_LIFETIME_MS;
@@ -239,46 +269,77 @@ async function dbRedeem(codeStr, origin, email) {
   if (pool) {
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      const { rows } = await client.query('SELECT * FROM codes WHERE code=$1 FOR UPDATE', [codeStr]);
-      if (rows.length === 0) {
-        await client.query('ROLLBACK');
-        return { error: 'invalid_code' };
+      await q(client, 'begin', 'BEGIN');
+      // Lock latest active code for this email
+      const sel = await q(
+        client,
+        'select_active_code',
+        `SELECT id, code, code_hash, redeemed, status, expires_at
+           FROM codes
+          WHERE lower(note) = $1 AND (status IS NULL OR status = 'active')
+          ORDER BY created_at DESC
+          FOR UPDATE LIMIT 1`,
+        [(email || '').toLowerCase()]
+      );
+      if (sel.rows.length === 0) { throw new Error('NO_ACTIVE_CODE'); }
+      const c = sel.rows[0];
+      // Check used/expired status
+      if (c.status && ['used','revoked','expired'].includes(String(c.status))) {
+        throw new Error('INVALID_CODE');
       }
-      const c = rows[0];
-      if (c.redeemed) {
-        await client.query('ROLLBACK');
-        return { error: 'already_redeemed' };
+      if (c.redeemed === true) { throw new Error('INVALID_CODE'); }
+      if (c.expires_at && new Date(c.expires_at) < new Date()) { throw new Error('EXPIRED_CODE'); }
+      // Verify hash or legacy plaintext
+      let ok = false;
+      if (c.code_hash) {
+        ok = await argon2.verify(c.code_hash, codeStr).catch(() => false);
       }
-      // Backfill hash if missing
-      if (!c.code_hash && c.code) {
-        try {
+      if (!ok && c.code) {
+        ok = (c.code === codeStr);
+        if (ok) {
           const h = await argon2.hash(c.code);
-          await client.query('UPDATE codes SET code_hash=$1 WHERE id=$2', [h, c.id]);
-        } catch {}
+          await q(client, 'backfill_hash', 'UPDATE codes SET code_hash=$1, code=NULL WHERE id=$2', [h, c.id]);
+        }
       }
-      const insTok = await client.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, code_id, email) VALUES ($1, TRUE, $2, $3, FALSE, $4, $5) RETURNING id', [token, nowMs, expiresAt, c.id, (email || '').toLowerCase()]);
+      if (!ok) throw new Error('INVALID_CODE');
+
+      // Create token and mark code as used
+      const insTok = await q(
+        client,
+        'insert_token',
+        'INSERT INTO tokens (token, premium, created_at, expires_at, revoked, code_id, email) VALUES ($1, TRUE, $2, $3, FALSE, $4, $5) RETURNING id',
+        [token, nowMs, expiresAt, c.id, (email || '').toLowerCase()]
+      );
       const tokId = insTok.rows[0].id;
-      await client.query('UPDATE codes SET redeemed=TRUE, redeemed_at=$1, origin=$2 WHERE id=$3', [nowMs, origin || '', c.id]);
-      // Optional: clear legacy code after redemption
-      try { await client.query('UPDATE codes SET code=NULL WHERE id=$1', [c.id]); } catch {}
-      await client.query('INSERT INTO redemptions (code_id, token_id, origin, created_at) VALUES ($1, $2, $3, $4)', [c.id, tokId, origin || '', nowMs]);
-      await client.query('COMMIT');
+  await q(client, 'update_code_used', 'UPDATE codes SET redeemed=TRUE, redeemed_at=$1, origin=$2, status = $3 WHERE id=$4', [nowMs, origin || '', 'used', c.id]);
+      // Clear legacy plaintext if any (best effort)
+      try { await q(client, 'clear_plain', 'UPDATE codes SET code=NULL WHERE id=$1', [c.id]); } catch (_) {}
+      await q(client, 'insert_redemption', 'INSERT INTO redemptions (code_id, token_id, origin, created_at) VALUES ($1, $2, $3, $4)', [c.id, tokId, origin || '', nowMs]);
+      // Upsert license record if email provided
+      if (email) {
+        await q(client, 'upsert_license', `
+          INSERT INTO licenses (email, plan, active, activated_at)
+          VALUES ($1, 'premium', true, NOW())
+          ON CONFLICT (email)
+          DO UPDATE SET active = true, plan = 'premium', activated_at = NOW()
+        `, [email.toLowerCase()]);
+      }
+      await q(client, 'commit', 'COMMIT');
       return { token, premium: true };
     } catch (e) {
-      await client.query('ROLLBACK');
+      try { await q(client, 'rollback', 'ROLLBACK'); } catch (_) {}
       throw e;
     } finally {
       client.release();
     }
   } else {
+    // In-memory fallback
     const c = mem.codes.get(codeStr);
     if (!c) return { error: 'invalid_code' };
-    if (c.redeemed) return { error: 'already_redeemed' };
-  c.redeemed = true;
-    c.redeemed_at = nowMs;
-    c.origin = origin || '';
-  try { c.code = null; } catch {}
+    if (c.status && ['used','revoked','expired'].includes(String(c.status))) return { error: 'invalid_code' };
+    if (c.redeemed) return { error: 'invalid_code' };
+    if (c.expires_at && c.expires_at < Date.now()) return { error: 'expired_code' };
+    c.redeemed = true; c.redeemed_at = nowMs; c.origin = origin || ''; try { c.code = null; } catch {}
     const tokenId = mem.nextId.token++;
     mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id, email: (email || '').toLowerCase() });
     const redId = mem.nextId.redemption++;
@@ -414,7 +475,7 @@ async function dbListCodes() {
                ORDER BY t.created_at DESC
                LIMIT 1
              ) AS token_tail
-             (
+             ,(
                SELECT t.email
                FROM tokens t
                WHERE t.code_id = c.id
@@ -788,13 +849,16 @@ app.post('/billing-portal', validate(BillingSchema), async (req, res) => {
 });
 
 // POST /redeem { code }
-app.post('/redeem', async (req, res) => {
+app.post('/redeem', validate(RedeemSchema), async (req, res) => {
   try {
-    const body = req.body || {};
-    const code = String(body.code || '').trim();
+  const body = req.body || {};
+  const code = String(body.code || '').trim();
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
-    const key = ip + ':' + code;
-    const nowMs = now();
+  const email = String(body.email || '').trim().toLowerCase();
+  // 5-minute rate limit keyed by IP+email (fallback to code if no email)
+  const REDEEM_WINDOW_MS = 5 * 60 * 1000;
+  const key = `${ip}:${email || code}`;
+  const nowMs = now();
     // --- Developer master code: infinite use, never expires ---
     if (DEV_MASTER_CODE && code === DEV_MASTER_CODE) {
       const token = `dev-${randomUUID()}`;
@@ -806,8 +870,8 @@ app.post('/redeem', async (req, res) => {
       return res.json({ token, premium: true, dev: true });
     }
     // --- Rate limit ---
-    let arr = rateLimitMap.get(key) || [];
-    arr = arr.filter(ts => nowMs - ts < RATE_LIMIT_WINDOW);
+  let arr = rateLimitMap.get(key) || [];
+  arr = arr.filter(ts => nowMs - ts < REDEEM_WINDOW_MS);
     if (arr.length >= RATE_LIMIT_MAX) {
       return res.status(429).json({ error: 'Too many attempts, try again later.' });
     }
@@ -830,14 +894,23 @@ app.post('/redeem', async (req, res) => {
       console.log('TEST_MODE: OFF (/redeem)');
     }
 
-    if (!code) return res.status(400).json({ error: 'missing_code' });
-  const origin = req.headers.origin || '';
-  const email = String(body.email || '').trim().toLowerCase();
-  const result = await dbRedeem(code, origin, email);
-    if (result.error === 'invalid_code') return res.status(400).json({ error: 'invalid_code' });
-    if (result.error === 'already_redeemed') return res.status(409).json({ error: 'already_redeemed' });
-    console.info(`[REDEEM] ip=${ip} code=${code} => token=...${tokenTail(result.token)} at ${new Date(nowMs).toISOString()} origin=${origin}`);
-    res.json({ token: result.token, premium: true });
+    if (!code) return res.status(400).json({ error: 'Invalid or expired code.' });
+    const origin = req.headers.origin || '';
+    try {
+      const result = await dbRedeem(code, origin, email);
+      if (result?.error) {
+        return res.status(400).json({ error: 'Invalid or expired code.' });
+      }
+      console.info(`[REDEEM] ip=${ip} code=*** => token=...${tokenTail(result.token)} at ${new Date(nowMs).toISOString()} origin=${origin}`);
+      return res.json({ token: result.token, premium: true });
+    } catch (e) {
+      const msg = String(e?.message || '');
+      if (["NO_ACTIVE_CODE","INVALID_CODE","EXPIRED_CODE"].includes(msg)) {
+        return res.status(400).json({ error: 'Invalid or expired code.' });
+      }
+      log.error({ err: msg }, 'redeem_failed');
+      return res.status(500).json({ error: 'Server error. Please try again in a minute.' });
+    }
   } catch (err) {
     console.error('Redeem error:', err);
     res.status(500).json({ error: 'Server error' });

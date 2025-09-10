@@ -9,7 +9,8 @@ const { randomUUID } = require('crypto');
 require('dotenv').config();
 const { Pool } = require('pg');
 const Stripe = require('stripe');
-const sgMail = require('@sendgrid/mail');
+// Ensure fetch is available (Node 18+ has global fetch)
+const _fetch = (typeof fetch !== 'undefined') ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
 const app = express();
 // Use raw body for Stripe webhooks
@@ -37,11 +38,8 @@ const CORS_HAS_EXT_WILDCARD = ALLOW_ORIGINS.includes('chrome-extension://*');
 console.info('[ENV] DATABASE_URL set?', !!process.env.DATABASE_URL);
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
+const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
-}
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
@@ -240,19 +238,68 @@ async function dbRevokeTokensByCodeId(codeId) {
   }
 }
 
-async function sendCodeEmail(to, code) {
-  if (!SENDGRID_API_KEY || !FROM_EMAIL) {
-    console.warn('[EMAIL] Missing SENDGRID_API_KEY or FROM_EMAIL; skipping send');
+async function dbGetCodeByToken(tokenStr) {
+  if (pool) {
+    const q = `
+      SELECT c.id, c.code, c.note, c.created_at
+      FROM tokens t
+      JOIN codes c ON c.id = t.code_id
+      WHERE t.token = $1
+      LIMIT 1`;
+    const { rows } = await pool.query(q, [tokenStr]);
+    return rows[0] || null;
+  } else {
+    const t = mem.tokens.get(tokenStr);
+    if (!t) return null;
+    for (const c of mem.codes.values()) {
+      if (c.id === t.code_id) {
+        return { id: c.id, code: c.code, note: c.note, created_at: c.created_at };
+      }
+    }
+    return null;
+  }
+}
+
+async function sendEmail(to, subject, html) {
+  if (!BREVO_API_KEY || !FROM_EMAIL) {
+    console.warn('[EMAIL] Missing BREVO_API_KEY or FROM_EMAIL; skipping send');
     return;
   }
-  const msg = {
-    to,
-    from: FROM_EMAIL,
-    subject: 'Your AuraSync activation code',
-    text: `Your activation code: ${code}`,
-    html: `<p>Your activation code:</p><pre style="font-size:18px">${code}</pre>`
-  };
-  try { await sgMail.send(msg); } catch (e) { console.error('[EMAIL] send error', e?.response?.body || e); }
+  try {
+  const res = await _fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+        'api-key': BREVO_API_KEY,
+      },
+      body: JSON.stringify({
+        sender: { email: FROM_EMAIL },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html
+      })
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      console.error('[EMAIL] Brevo send failed', res.status, txt);
+    }
+  } catch (e) {
+    console.error('[EMAIL] Brevo send error', e);
+  }
+}
+
+function renderLicenseEmailHtml(code) {
+  return `<!doctype html>
+  <html><body style="font-family:system-ui,Segoe UI,Arial,sans-serif;line-height:1.5">
+    <h2>Your AuraSync license code</h2>
+    <p>We issued you a new license code and revoked any previous code.</p>
+    <p style="margin-top:12px">Your new code:</p>
+    <div style="font-size:20px;font-weight:700;letter-spacing:1px;background:#f4f6ff;padding:12px 16px;border-radius:8px;display:inline-block">
+      ${code}
+    </div>
+    <p style="margin-top:18px;color:#555">If you didn’t request this, reply to this email for help.</p>
+  </body></html>`;
 }
 
 async function dbListCodes() {
@@ -389,10 +436,10 @@ app.post('/webhook', async (req, res) => {
     }
 
     if ((type === 'checkout.session.completed' || type === 'invoice.paid') && email) {
-      const codes = await dbCreateCodes(1, email);
-      const code = codes[0];
-      console.info(`[WH] ${type} -> issued code for ${email}`);
-      await sendCodeEmail(email, code);
+  const codes = await dbCreateCodes(1, email);
+  const code = codes[0];
+  console.info(`[WH] ${type} -> issued code for ${email}`);
+  await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
     }
 
     if (type === 'customer.subscription.deleted') {
@@ -509,14 +556,67 @@ app.post('/regenerate', async (req, res) => {
     }
 
     // Generate and revoke old
-    const codes = await dbCreateCodes(1, email);
-    const code = codes[0];
-    if (last && last.id) await dbRevokeTokensByCodeId(last.id);
-    await sendCodeEmail(email, code);
+  const codes = await dbCreateCodes(1, email);
+  const code = codes[0];
+  if (last && last.id) await dbRevokeTokensByCodeId(last.id);
+  await sendEmail(email, 'Your new AuraSync license code', renderLicenseEmailHtml(code));
     res.json({ ok: true });
   } catch (e) {
     console.error('Regenerate error:', e);
     res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// --- Lost code self-service: validate active sub, 7-day cooldown, send new code ---
+app.post('/lost-code', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const token = String(req.body?.token || '').trim();
+    if (!email) return res.status(400).json({ error: 'missing_email' });
+    if (!token) return res.status(400).json({ error: 'missing_token' });
+    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+
+    // Verify token exists and is valid (not revoked, not expired)
+    const t = await dbGetToken(token);
+    const nowMs = Date.now();
+    if (!t) return res.status(404).json({ error: 'invalid_token' });
+    const exp = t.expires_at || t.expiresAt;
+    if (t.revoked) return res.status(403).json({ error: 'token_revoked' });
+    if (!exp || exp <= nowMs) return res.status(403).json({ error: 'token_expired' });
+
+    // Get code associated with token and confirm email matches
+    const codeRow = await dbGetCodeByToken(token);
+    if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
+    const codeEmail = String(codeRow.note || '').toLowerCase();
+    if (codeEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
+
+    // Verify customer exists and has active subscription
+    let customerId = null;
+    const customers = await stripe.customers.list({ email, limit: 1 });
+    if (customers?.data?.length) customerId = customers.data[0].id;
+    if (!customerId) return res.status(404).json({ error: 'customer_not_found' });
+    const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
+    if (!subs?.data?.length) return res.status(403).json({ error: 'subscription_not_active' });
+
+    // Enforce 7-day cooldown since last issuance
+    const last = await dbLatestCodeForEmail(email);
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    if (last && last.created_at && Date.now() - Number(last.created_at) <= sevenDays) {
+      return res.status(429).json({ error: 'too_soon' });
+    }
+
+    // Revoke current token and any tokens tied to the old code
+    await dbRevokeToken(token);
+    if (codeRow.id) await dbRevokeTokensByCodeId(codeRow.id);
+
+    // Generate a new code and email it
+  const codes = await dbCreateCodes(1, email);
+  const newCode = codes[0];
+  await sendEmail(email, 'Your new AuraSync license code', renderLicenseEmailHtml(newCode));
+    return res.json({ success: true, message: 'New code sent to your email' });
+  } catch (e) {
+    console.error('Lost-code error:', e);
+    return res.status(500).json({ error: 'server_error' });
   }
 });
 

@@ -1,4 +1,3 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 // Minimal AuraSync backend: redeem codes and check premium status
 const express = require('express');
 const helmet = require('helmet');
@@ -84,8 +83,8 @@ function validate(schema) {
 
 const ActivateSchema = z.object({ session_id: z.string().min(10).max(200) });
 const RedeemSchema = z.object({
-  email: z.string().email(),
-  code: z.string().min(8).max(200)
+  email: z.string().email().transform((s) => s.trim().toLowerCase()),
+  code: z.string().min(8).max(200).transform((s) => s.trim())
 });
 const LostCodeSchema = z.object({ email: z.string().email(), token: z.string().min(10).max(500) });
 
@@ -121,11 +120,12 @@ console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
 if (process.env.DATABASE_URL) {
+  const ssl = (process.env.NODE_ENV === 'production') ? { rejectUnauthorized: true } : { rejectUnauthorized: false };
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    ssl
   });
-  console.info('[DB] using pg (SSL no-verify)');
+  console.info('[DB] using pg');
 } else {
   console.info('[DB] using in-memory store');
 }
@@ -172,8 +172,9 @@ async function initStorage() {
   await pool.query('ALTER TABLE tokens ADD COLUMN IF NOT EXISTS email TEXT');
     // Hashing migration columns
     await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS code_hash TEXT");
-    await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'");
+  await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'");
     await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days')");
+  await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ");
     // Ensure licenses table exists for activation bookkeeping
     await pool.query(`
       CREATE TABLE IF NOT EXISTS licenses (
@@ -182,8 +183,35 @@ async function initStorage() {
         active BOOLEAN,
         activated_at TIMESTAMPTZ
       )`);
-    // One-active-per-email (using codes.note as email during migration)
-    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS codes_active_unique ON codes (note) WHERE status = 'active'");
+    // One-active-per-email (using codes.note as email during migration). Create with cleanup and retry.
+    try {
+      await pool.query('DROP INDEX IF EXISTS public.codes_active_unique');
+      await pool.query("CREATE UNIQUE INDEX public.codes_active_unique ON public.codes (note) WHERE status = 'active'");
+    } catch (e) {
+      if (e && (e.code === '23505' || e.code === '42P07')) {
+        console.warn('[DB] Active index create conflict; normalizing and revoking older active per email, then retrying');
+        // 1) normalize emails
+        await pool.query("UPDATE public.codes SET note = LOWER(TRIM(note)) WHERE note IS NOT NULL");
+        // 2) revoke older active codes (keep most recent)
+        await pool.query(`WITH ranked AS (
+          SELECT id, note, status, created_at,
+                 ROW_NUMBER() OVER (PARTITION BY note ORDER BY created_at DESC) AS rn
+          FROM public.codes
+          WHERE status = 'active'
+        )
+        UPDATE public.codes c
+           SET status = 'revoked', revoked_at = NOW()
+          FROM ranked r
+         WHERE c.id = r.id
+           AND r.rn > 1`);
+        // 3) recreate index
+        await pool.query('DROP INDEX IF EXISTS public.codes_active_unique');
+        await pool.query("CREATE UNIQUE INDEX public.codes_active_unique ON public.codes (note) WHERE status = 'active'");
+      } else {
+        console.error('[DB] Failed to create active index:', e);
+        throw e;
+      }
+    }
     await pool.query(`
       CREATE TABLE IF NOT EXISTS purchase_events (
         id SERIAL PRIMARY KEY,
@@ -851,10 +879,8 @@ app.post('/billing-portal', validate(BillingSchema), async (req, res) => {
 // POST /redeem { code }
 app.post('/redeem', validate(RedeemSchema), async (req, res) => {
   try {
-  const body = req.body || {};
-  const code = String(body.code || '').trim();
+  const { email, code } = req.valid;
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
-  const email = String(body.email || '').trim().toLowerCase();
   // 5-minute rate limit keyed by IP+email (fallback to code if no email)
   const REDEEM_WINDOW_MS = 5 * 60 * 1000;
   const key = `${ip}:${email || code}`;
@@ -883,10 +909,10 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
       const expiresAt = nowMs + TOKEN_LIFETIME_MS;
       if (pool) {
         // create a "free" token not linked to a code
-    await pool.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, email) VALUES ($1, TRUE, $2, $3, FALSE, $4)', [token, nowMs, expiresAt, String(body.email || '').trim().toLowerCase()]);
+    await pool.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, email) VALUES ($1, TRUE, $2, $3, FALSE, $4)', [token, nowMs, expiresAt, email]);
       } else {
         const id = mem.nextId.token++;
-    mem.tokens.set(token, { id, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: null, email: String(body.email || '').trim().toLowerCase() });
+    mem.tokens.set(token, { id, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: null, email });
       }
       console.info(`[REDEEM] ANY_CODE ip=${ip} code=${code} => token=...${tokenTail(token)}`);
       return res.json({ token, premium: true });

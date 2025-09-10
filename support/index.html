@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-active="support">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,39 +12,66 @@
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/partials/include.js" defer></script>
 </head>
-<body>
-<nav>
-  <a class="brand" href="/">AuraSync</a>
-  <div class="links"><a href="/pricing/">Pricing</a> <a href="/legal/">Legal</a></div>
-</nav>
-<section class="hero">
-  <h1>Support</h1>
-  <p>Common questions and a way to contact us.</p>
-</section>
-<section class="features">
-  <h3>FAQ</h3>
-  <ul>
-    <li>Where do I find my activation code? — It’s on the success page after purchase and sent to your email.</li>
-    <li>How do I cancel? — Use the Manage Billing link from Pricing or your Stripe email receipts.</li>
-    <li>Lost your code? — Use the Lost Code flow in the extension settings.</li>
-  </ul>
-  <h3>Contact</h3>
-  <form id="contactForm">
-    <input type="email" id="email" placeholder="Your email" required style="display:block; margin-bottom:8px;">
-    <textarea id="message" placeholder="How can we help?" required style="display:block; width:100%; height:120px; margin-bottom:8px;"></textarea>
-    <button class="btn" type="submit">Send</button>
-    <div id="note" class="small" style="margin-top:8px; opacity:0.8"></div>
-  </form>
-</section>
-<footer>
-  AuraSync © 2025 • <a href="/legal/" rel="noopener noreferrer">Legal</a>
-</footer>
-<script>
-  document.getElementById('contactForm').addEventListener('submit', function(ev){
-    ev.preventDefault();
-    document.getElementById('note').textContent = 'Thanks! Email us directly at support@aurasync.info while we add backend handling.';
-  });
-</script>
+<body class="text-slate-300 bg-black">
+  <div data-include="/partials/header.html"></div>
+  <main>
+    <section class="hero-gradient">
+      <div class="container py-16 md:py-24">
+        <h1 class="text-4xl md:text-5xl font-semibold text-slate-100">Support</h1>
+        <p class="mt-2 text-slate-400">We reply within 1–3 business days.</p>
+        <div class="grid md:grid-cols-2 gap-8 mt-10">
+          <div>
+            <div class="card p-6">
+              <h3 class="text-xl text-slate-100 font-medium">FAQ</h3>
+              <div class="mt-3 space-y-2">
+                <details class="rounded-lg border border-white/10 p-3 bg-white/5"><summary>Where do I find my activation code?</summary><div class="mt-2 text-sm">On the success page after purchase and in your email.</div></details>
+                <details class="rounded-lg border border-white/10 p-3 bg-white/5"><summary>How do I cancel?</summary><div class="mt-2 text-sm">Use the Manage Billing link from Pricing or your Stripe receipt.</div></details>
+                <details class="rounded-lg border border-white/10 p-3 bg-white/5"><summary>Lost your code?</summary><div class="mt-2 text-sm">Open the extension → Settings → Lost Code.</div></details>
+              </div>
+            </div>
+          </div>
+          <div>
+            <form id="contactForm" class="card p-6 max-w-xl mx-auto">
+              <h3 class="text-xl text-slate-100 font-medium">Contact</h3>
+              <label class="block mt-3 text-sm">Email
+                <input type="email" id="email" required class="mt-1 w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2" aria-invalid="false">
+              </label>
+              <label class="block mt-3 text-sm">Message
+                <textarea id="message" required class="mt-1 w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 h-32"></textarea>
+              </label>
+              <button class="btn-secondary mt-4 px-4 py-2 rounded-lg" type="submit">Send</button>
+              <div id="note" class="text-sm mt-3"></div>
+              <p class="text-xs text-slate-400 mt-3">We respect your privacy. See our <a href="/legal/privacy/" class="underline">Privacy Policy</a>.</p>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div data-include="/partials/footer.html"></div>
+  <script>
+    const form = document.getElementById('contactForm');
+    const email = document.getElementById('email');
+    const message = document.getElementById('message');
+    const note = document.getElementById('note');
+    form?.addEventListener('submit', async (ev)=>{
+      ev.preventDefault();
+      note.textContent = '';
+      email.setAttribute('aria-invalid','false');
+      message.setAttribute('aria-invalid','false');
+      if(!email.value || !email.value.includes('@')) { email.setAttribute('aria-invalid','true'); note.textContent='Enter a valid email.'; return; }
+      if(!message.value || message.value.length < 5) { message.setAttribute('aria-invalid','true'); note.textContent='Please enter a message.'; return; }
+      try {
+        const res = await fetch('/support/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: email.value, message: message.value }) });
+        if(!res.ok) throw new Error('fail');
+        note.textContent = 'Thanks. We will get back to you.';
+      } catch {
+        note.textContent = 'Failed to send. Email us at support@aurasync.info.';
+      }
+    });
+  </script>
 </body>
 </html>

@@ -1,0 +1,29 @@
+<header class="border-b border-white/10 bg-black/60 backdrop-blur-md sticky top-0 z-40">
+  <div class="container flex items-center justify-between py-3">
+    <a href="/" class="flex items-center gap-2">
+      <img src="/logo/icon_only.png" alt="AuraSync logo" class="w-8 h-8" width="32" height="32"/>
+      <span class="font-semibold text-white">AuraSync</span>
+    </a>
+    <nav class="hidden md:flex items-center gap-6 text-slate-300">
+      <a href="/" data-nav="home" class="hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-400 rounded">Home</a>
+      <a href="/pricing/" data-nav="pricing" class="hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-400 rounded">Pricing</a>
+      <a href="/faq/" data-nav="faq" class="hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-400 rounded">FAQ</a>
+      <a href="/support/" data-nav="support" class="hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-400 rounded">Support</a>
+    </nav>
+    <button id="menu" class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded border border-white/10 text-slate-200">☰</button>
+  </div>
+  <nav id="mobile" class="md:hidden hidden border-t border-white/10 bg-black/80">
+    <div class="container py-3 flex flex-col gap-2">
+      <a href="/" data-nav="home" class="py-2">Home</a>
+      <a href="/pricing/" data-nav="pricing" class="py-2">Pricing</a>
+      <a href="/faq/" data-nav="faq" class="py-2">FAQ</a>
+      <a href="/support/" data-nav="support" class="py-2">Support</a>
+    </div>
+  </nav>
+  <script>
+    document.getElementById('menu')?.addEventListener('click',()=>{
+      const m = document.getElementById('mobile');
+      if(!m) return; m.classList.toggle('hidden');
+    });
+  </script>
+</header>

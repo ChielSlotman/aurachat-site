@@ -1,0 +1,11 @@
+/* Minimal system styles to complement Tailwind */
+:root{
+  --container: 1200px;
+}
+.container{max-width:var(--container); margin-left:auto; margin-right:auto; padding-left:1rem; padding-right:1rem}
+.hero-gradient{background: radial-gradient(1200px 400px at 50% -200px, rgba(99,102,241,0.35), transparent 60%)}
+.border-glow{border-top:1px solid rgba(255,255,255,0.08); box-shadow: 0 -1px 0 rgba(255,255,255,0.04) inset}
+.btn-primary{background:linear-gradient(90deg,#6366f1,#8b5cf6); color:#fff}
+.btn-secondary{background:rgba(255,255,255,0.08); color:#fff}
+.btn-plain{background:transparent; color:#fff}
+.card{border:1px solid rgba(255,255,255,0.1); border-radius:1rem; background:rgba(255,255,255,0.06); box-shadow:0 10px 30px rgba(0,0,0,0.3); backdrop-filter: blur(10px)}

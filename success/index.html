@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-active="success">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,50 +12,52 @@
   <meta property="og:url" content="https://aurasync.info/success/" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
-  <link rel="stylesheet" href="/styles.css?v=2025-09-10-2">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/partials/include.js" defer></script>
 </head>
-<body>
-<nav>
-  <a class="brand" href="/">
-    <img src="/logo/icon_only.png" alt="AuraSync logo" width="32" height="32" loading="lazy">
-    <div class="name">AuraSync</div>
-  </a>
-  <div class="links">
-    <a href="/">Home</a>
-    <a href="/support/">Support</a>
-  </div>
-</nav>
-<section class="hero">
-  <h1>AuraSync Premium Activated</h1>
-  <p id="lead">Checking your payment…</p>
-</section>
-<section class="features">
-  <div class="card" style="max-width:640px; margin-left:auto; margin-right:auto;">
-    <div id="spinner" class="spinner" aria-live="polite" style="display:none"></div>
-    <div id="result" style="display:none"></div>
-    <div id="actions" style="margin-top:12px; display:flex; gap:8px;"></div>
-  </div>
-</section>
-<footer>
-  AuraSync © 2025. Not affiliated with Character.AI. • <a href="/legal/" rel="noopener noreferrer">Legal</a> • <a href="/support/" rel="noopener noreferrer">Support</a>
-</footer>
+<body class="text-slate-300 bg-black">
+  <div data-include="/partials/header.html"></div>
+  <main>
+    <section class="hero-gradient">
+      <div class="container py-16 md:py-24">
+        <div class="card p-6 md:p-8 max-w-2xl mx-auto">
+          <h1 class="text-3xl font-semibold text-slate-100">AuraSync Premium</h1>
+          <p id="lead" class="mt-2 text-slate-400" aria-live="polite">Checking your payment…</p>
+          <div id="spinner" role="status" class="mt-4 hidden">⏳</div>
+          <div id="success" class="hidden mt-6">
+            <div class="text-green-400 text-4xl">✓</div>
+            <h2 class="text-2xl text-slate-100 mt-2">Premium Activated</h2>
+            <p class="mt-2 text-slate-300">We emailed the code to <strong id="emailOut"></strong>.</p>
+            <div class="mt-4 flex gap-2 items-center">
+              <input id="code" readonly class="flex-1 rounded-xl bg-black/40 border border-white/10 px-3 py-2" aria-label="Activation code">
+              <button id="copy" class="btn-secondary px-4 py-2 rounded-lg">Copy</button>
+            </div>
+            <div class="mt-6 flex flex-wrap gap-3">
+              <a href="#" class="btn-secondary px-4 py-2 rounded-lg" rel="noopener noreferrer">Open the extension</a>
+              <button id="open-portal" class="btn-secondary px-4 py-2 rounded-lg">Manage billing</button>
+            </div>
+          </div>
+          <div id="error" class="hidden mt-6">
+            <p class="text-red-400">We could not verify your purchase yet. Please wait 30 seconds and refresh. If it persists, contact support.</p>
+            <button id="retry" class="btn-secondary mt-3 px-4 py-2 rounded-lg">Retry</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div data-include="/partials/footer.html"></div>
+
 <script>
 function getParam(name){try{const u=new URL(window.location.href);return u.searchParams.get(name);}catch{return null}}
 function el(id){return document.getElementById(id)}
-function showSpinner(on){el('spinner').style.display=on?'block':'none'}
+function showSpinner(on){el('spinner').classList.toggle('hidden',!on)}
 function setLead(txt){el('lead').textContent=txt}
 async function activate(){
   const sid=getParam('session_id');
-  const actions=el('actions');
-  actions.innerHTML='';
   if(!sid){
-    setLead('We could not detect your session. Click “Back to pricing” and try again.');
-    el('result').style.display='none';
-    const back=document.createElement('a');
-    back.href='/pricing/';
-    back.className='btn';
-    back.textContent='Back to pricing';
-    actions.appendChild(back);
+    setLead('We could not detect your session.');
+    el('error').classList.remove('hidden');
     return;
   }
   showSpinner(true);
@@ -68,23 +70,27 @@ async function activate(){
     }
     const code=(data.code||'').trim();
     const email=(data.email||'').trim();
-    el('result').style.display='block';
-    el('result').innerHTML=`Here is your activation code: <strong>${code}</strong>. We also sent it to <strong>${email}</strong>. Open the extension and paste the code.`;
-    setLead('');
-    actions.innerHTML='';
+    el('success').classList.remove('hidden');
+    el('error').classList.add('hidden');
+    el('code').value = code;
+    el('emailOut').textContent = email;
+    setLead('Here is your activation code');
   }catch(e){
-    setLead('We could not verify your purchase yet. Please wait 30 seconds and refresh. If it persists, contact support.');
-    const retry=document.createElement('button');
-    retry.className='btn';
-    retry.textContent='Retry';
-    retry.onclick=activate;
-    actions.innerHTML='';
-    actions.appendChild(retry);
+    setLead('');
+    el('success').classList.add('hidden');
+    el('error').classList.remove('hidden');
   }finally{
     showSpinner(false);
   }
 }
 activate();
+el('copy')?.addEventListener('click',()=>{const i=el('code');i.select();document.execCommand('copy');});
+el('retry')?.addEventListener('click', activate);
+el('open-portal')?.addEventListener('click', async()=>{
+  const customer_id = window.localStorage.getItem('stripe_customer_id')||'';
+  if(!customer_id){alert('Use your Stripe receipt to manage billing.');return;}
+  try{const r=await fetch('https://api.aurasync.info/billing-portal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id})});const d=await r.json();if(d?.url){window.location.href=d.url}else alert('Portal unavailable')}catch{alert('Portal unavailable')}
+});
 </script>
 </body>
 </html>

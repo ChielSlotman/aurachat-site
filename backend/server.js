@@ -1,6 +1,11 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 // Minimal AuraSync backend: redeem codes and check premium status
 const express = require('express');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+const pino = require('pino');
+const { z } = require('zod');
 // Note: using a custom CORS handler to meet exact policy requirements
 const fs = require('fs').promises;
 const path = require('path');
@@ -16,6 +21,55 @@ const app = express();
 // Use raw body for Stripe webhooks
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
+// Request IDs
+app.use((req, res, next) => { res.setHeader('X-Request-Id', crypto.randomUUID()); next(); });
+// Security headers & CSP
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      "default-src": ["'self'"],
+      "script-src": ["'self'", "https://js.stripe.com"],
+      "frame-src": ["'self'", "https://js.stripe.com", "https://checkout.stripe.com"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "img-src": ["'self'", 'data:'],
+      "connect-src": ["'self'", "https://api.stripe.com"],
+      "base-uri": ["'self'"],
+      "form-action": ["'self'"],
+      "frame-ancestors": ["'none'"]
+    }
+  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginResourcePolicy: { policy: 'same-origin' }
+}));
+// Compression
+app.use(compression());
+// Logger
+const log = pino();
+app.use((req, res, next) => {
+  const id = req.get('X-Request-Id');
+  log.info({ id, method: req.method, path: req.path, ip: req.ip }, 'req');
+  const end = res.end;
+  res.end = function (...args) {
+    log.info({ id, status: res.statusCode }, 'res');
+    end.apply(this, args);
+  };
+  next();
+});
+
+// Zod validation helper
+function validate(schema) {
+  return (req, res, next) => {
+    const r = schema.safeParse(req.body);
+    if (!r.success) return res.status(400).json({ error: 'Invalid input' });
+    req.valid = r.data;
+    next();
+  };
+}
+
+const ActivateSchema = z.object({ session_id: z.string().min(10).max(200) });
+const LostCodeSchema = z.object({ email: z.string().email(), token: z.string().min(10).max(500) });
 
 const PORT = Number(process.env.PORT || 8787);
 const STORE_FILE = path.join(__dirname, 'store.json');
@@ -41,6 +95,7 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+const VERSION = '0.1.0';
 
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
 console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
@@ -98,6 +153,13 @@ async function initStorage() {
     await pool.query(ddl);
   // Ensure new columns exist without breaking existing databases
   await pool.query('ALTER TABLE tokens ADD COLUMN IF NOT EXISTS email TEXT');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchase_events (
+        id SERIAL PRIMARY KEY,
+        session_id TEXT UNIQUE NOT NULL,
+        email TEXT,
+        created_at BIGINT NOT NULL
+      )`);
     // Seed demo code if not present
     await pool.query('INSERT INTO codes (code, redeemed, created_at) VALUES ($1, FALSE, $2) ON CONFLICT (code) DO NOTHING', ['DEMO-AURASYNC-1234', Date.now()]);
   } else {
@@ -371,48 +433,25 @@ async function dbListCodes() {
 // --- Simple JSON "DB" helpers ---
 function now() { return Date.now(); }
 
-// --- CORS configuration (custom) ---
+// --- Request ID middleware ---
 app.use((req, res, next) => {
-  const origin = req.headers.origin || '';
+  const rid = crypto.randomUUID();
+  req.requestId = rid;
+  res.setHeader('X-Request-Id', rid);
+  next();
+});
 
-  let allowed = false;
-  if (CORS_HAS_WILDCARD) {
-    allowed = true;
-  } else if (!origin) {
-    // Allow requests without Origin header (extensions/native/curl)
-    allowed = true;
-  } else if (ALLOW_ORIGINS.length === 0) {
-    // No list provided -> allow all during early testing
-    allowed = true;
-  } else if (ALLOW_ORIGINS.includes(origin)) {
-    // Exact match including chrome-extension://<ID>
-    allowed = true;
-  } else if (CORS_HAS_EXT_WILDCARD && origin.startsWith('chrome-extension://')) {
-    // Allow any Chrome extension origin when chrome-extension://* is configured
-    allowed = true;
+// --- CORS configuration (strict) ---
+const STRICT_ALLOWED = new Set(['https://aurasync.info', 'https://www.aurasync.info']);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && STRICT_ALLOWED.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
   }
-
-  // Log decision
-  console.log(`[CORS] Origin: ${origin || '(none)'} => ${allowed ? 'allowed' : 'denied'}`);
-
-  // Apply headers if allowed
-  if (allowed) {
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'false');
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Origin', CORS_HAS_WILDCARD ? '*' : (origin || '*'));
-  }
-
-  // Always handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-
-  if (!allowed) {
-    return res.status(403).json({ error: 'Not allowed by CORS' });
-  }
-
+  res.header('Vary', 'Origin');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
 
@@ -492,6 +531,88 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Stripe webhook (idempotent code issuance)
+app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const requestId = crypto.randomUUID();
+  try {
+    if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(500).json({ error: 'webhook_not_configured' });
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+      console.error(`[WH2 ${requestId}] bad signature:`, err?.message);
+      return res.status(400).send('Bad signature');
+    }
+    const type = event.type;
+    if (type !== 'checkout.session.completed') {
+      console.info(`[WH2 ${requestId}] ignore ${type}`);
+      return res.json({ received: true });
+    }
+    const session = event.data?.object;
+    const sessionId = session?.id;
+    if (!sessionId) return res.status(400).json({ error: 'missing_session' });
+    // Retrieve to be sure
+    let full;
+    try {
+      full = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['customer'] });
+    } catch (e) {
+      console.error(`[WH2 ${requestId}] retrieve failed`);
+      return res.status(502).json({ error: 'stripe_unavailable' });
+    }
+    if (!full || full.payment_status !== 'paid') {
+      console.info(`[WH2 ${requestId}] not paid`);
+      return res.status(400).json({ error: 'not_paid' });
+    }
+    const email = (full.customer_details?.email || full.customer?.email || '').toLowerCase();
+    if (!email) return res.status(400).json({ error: 'no_email' });
+    const nowMs = Date.now();
+    // Idempotency: ensure we process a given session once
+    if (pool) {
+      const { rows } = await pool.query('SELECT 1 FROM purchase_events WHERE session_id=$1', [sessionId]);
+      if (rows.length) {
+        console.info(`[WH2 ${requestId}] already processed ${sessionId}`);
+        return res.json({ received: true, idempotent: true });
+      }
+      // Issue code and record event atomically
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const last = await client.query('SELECT id FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 1', [email]);
+        const codes = await dbCreateCodes(1, email);
+        const code = codes[0];
+        if (last.rows.length) await dbRevokeTokensByCodeId(last.rows[0].id);
+        await client.query('INSERT INTO purchase_events (session_id, email, created_at) VALUES ($1, $2, $3)', [sessionId, email, nowMs]);
+        await client.query('COMMIT');
+        console.info(`[WH2 ${requestId}] issued code for ${email}`);
+        await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
+        return res.json({ received: true });
+      } catch (e) {
+        await client.query('ROLLBACK');
+        console.error(`[WH2 ${requestId}] tx failed`);
+        return res.status(500).json({ error: 'server_error' });
+      } finally {
+        client.release();
+      }
+    } else {
+      // Memory idempotency
+      if (!mem.purchase_events) mem.purchase_events = new Set();
+      if (mem.purchase_events.has(sessionId)) {
+        return res.json({ received: true, idempotent: true });
+      }
+      const last = await dbLatestCodeForEmail(email);
+      const codes = await dbCreateCodes(1, email);
+      const code = codes[0];
+      if (last && last.id) await dbRevokeTokensByCodeId(last.id);
+      mem.purchase_events.add(sessionId);
+      await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
+      return res.json({ received: true });
+    }
+  } catch (e) {
+    console.error('[WH2] error', e);
+    return res.status(500).end();
+  }
+});
+
 // Create a Stripe Checkout Session (subscription)
 app.post('/create-checkout-session', async (req, res) => {
   try {
@@ -511,44 +632,56 @@ app.post('/create-checkout-session', async (req, res) => {
 });
 
 // POST /activate { session_id }
-app.post('/activate', async (req, res) => {
+// Apply rate limits
+const burstLimiter = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
+app.use('/stripe/webhook', burstLimiter);
+const codeLimiter = rateLimit({ windowMs: 5 * 60_000, max: 10, keyGenerator: (req) => (req.body?.email || req.ip) });
+app.use(['/activate', '/lost-code'], codeLimiter);
+
+app.post('/activate', validate(ActivateSchema), async (req, res) => {
   try {
-    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+    if (!stripe) return res.status(500).json({ error: 'Activation temporarily unavailable' });
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
     const nowMs = now();
     const key = `activate:${ip}`;
     let arr = rateLimitMap.get(key) || [];
     arr = arr.filter(ts => nowMs - ts < RATE_LIMIT_WINDOW);
     if (arr.length >= RATE_LIMIT_MAX) {
-      return res.status(429).json({ error: 'rate_limited', message: 'Too many attempts. Please wait and try again.' });
+      return res.status(429).json({ error: 'Too many attempts, try again later.' });
     }
     arr.push(nowMs);
     rateLimitMap.set(key, arr);
 
-    const sessionId = String(req.body?.session_id || '').trim();
-    if (!sessionId) return res.status(400).json({ error: 'missing_session_id' });
+  const { session_id } = req.valid;
+    if (!session_id || typeof session_id !== 'string') {
+      return res.status(400).json({ error: 'Missing session_id' });
+    }
+
     let session;
     try {
-      session = await stripe.checkout.sessions.retrieve(sessionId);
-    } catch (e) {
-      return res.status(400).json({ error: 'invalid_session', message: 'Could not retrieve session.' });
+      session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['customer'] });
+    } catch (err) {
+      const isStripeErr = err?.type && String(err.type).toLowerCase().includes('stripe');
+      return res.status(isStripeErr ? 502 : 500).json({ error: 'Activation temporarily unavailable' });
     }
-    if (!session || session.payment_status !== 'paid') {
-      return res.status(402).json({ error: 'not_paid', message: 'Payment not completed yet.' });
-    }
-    const email = (session.customer_details?.email || session.customer_email || '').toLowerCase();
-    if (!email) return res.status(400).json({ error: 'missing_email', message: 'No email associated with session.' });
 
-    // Create a new code for this email (revoke older tokens for previous code)
+    if (!session || session.payment_status !== 'paid') {
+      return res.status(400).json({ error: 'Payment not completed yet' });
+    }
+
+    const email = (session.customer_details?.email || session.customer?.email || '').toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Email not found on session' });
+
     const last = await dbLatestCodeForEmail(email);
     const codes = await dbCreateCodes(1, email);
     const code = codes[0];
     if (last && last.id) await dbRevokeTokensByCodeId(last.id);
 
     return res.json({ code, email });
-  } catch (e) {
-    console.error('Activate error:', e);
-    return res.status(500).json({ error: 'server_error' });
+  } catch (err) {
+    const isStripeErr = err?.type && String(err.type).toLowerCase().includes('stripe');
+    console.error('Activate error:', err);
+    return res.status(isStripeErr ? 502 : 500).json({ error: 'Activation temporarily unavailable' });
   }
 });
 
@@ -665,10 +798,23 @@ app.post('/regenerate', async (req, res) => {
 });
 
 // --- Lost code self-service: validate active sub, 7-day cooldown, send new code ---
-app.post('/lost-code', async (req, res) => {
+app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
   try {
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const token = String(req.body?.token || '').trim();
+    // Rate limit per IP+email for lost-code
+    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
+    const rawEmail = String(req.body?.email || '').trim().toLowerCase();
+    const keyRL = `lost:${ip}:${rawEmail}`;
+    const nowMsRL = Date.now();
+    let arrRL = rateLimitMap.get(keyRL) || [];
+    arrRL = arrRL.filter(ts => nowMsRL - ts < RATE_LIMIT_WINDOW);
+    if (arrRL.length >= RATE_LIMIT_MAX) {
+      return res.status(429).json({ error: 'Too many attempts, try again later.' });
+    }
+    arrRL.push(nowMsRL);
+    rateLimitMap.set(keyRL, arrRL);
+
+  const email = req.valid.email.toLowerCase();
+  const token = req.valid.token;
     if (!email) return res.status(400).json({ error: 'missing_email' });
     if (!token) return res.status(400).json({ error: 'missing_token' });
     if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Support — AuraSync</title>
+  <link rel="canonical" href="https://aurasync.info/support/">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">AuraSync</a>
+  <div class="links"><a href="/pricing/">Pricing</a> <a href="/legal/">Legal</a></div>
+</nav>
+<section class="hero">
+  <h1>Support</h1>
+  <p>Common questions and a way to contact us.</p>
+</section>
+<section class="features">
+  <h3>FAQ</h3>
+  <ul>
+    <li>Where do I find my activation code? — It’s on the success page after purchase and sent to your email.</li>
+    <li>How do I cancel? — Use the Manage Billing link from Pricing or your Stripe email receipts.</li>
+    <li>Lost your code? — Use the Lost Code flow in the extension settings.</li>
+  </ul>
+  <h3>Contact</h3>
+  <form id="contactForm">
+    <input type="email" id="email" placeholder="Your email" required style="display:block; margin-bottom:8px;">
+    <textarea id="message" placeholder="How can we help?" required style="display:block; width:100%; height:120px; margin-bottom:8px;"></textarea>
+    <button class="btn" type="submit">Send</button>
+    <div id="note" class="small" style="margin-top:8px; opacity:0.8"></div>
+  </form>
+</section>
+<footer>
+  AuraSync © 2025 • <a href="/legal/">Legal</a>
+</footer>
+<script>
+  document.getElementById('contactForm').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    document.getElementById('note').textContent = 'Thanks! Email us directly at support@aurasync.info while we add backend handling.';
+  });
+</script>
+</body>
+</html>

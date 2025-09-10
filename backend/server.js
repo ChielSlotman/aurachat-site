@@ -635,11 +635,19 @@ app.post('/lost-code', async (req, res) => {
     const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
     if (!subs?.data?.length) return res.status(403).json({ error: 'subscription_not_active' });
 
-    // Enforce 7-day cooldown since last issuance
-    const last = await dbLatestCodeForEmail(email);
-    const sevenDays = 7 * 24 * 60 * 60 * 1000;
-    if (last && last.created_at && Date.now() - Number(last.created_at) <= sevenDays) {
-      return res.status(429).json({ error: 'too_soon' });
+    // Enforce 7-day cooldown since last issuance (unless bypassed for dev)
+    const bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';
+    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass);
+    if (!bypass) {
+      const last = await dbLatestCodeForEmail(email);
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
+      if (last && last.created_at) {
+        const age = Date.now() - Number(last.created_at);
+        if (age <= sevenDays) {
+          const retryAfterIso = new Date(Number(last.created_at) + sevenDays).toISOString();
+          return res.status(429).json({ error: 'too_soon', retry_after: retryAfterIso });
+        }
+      }
     }
 
     // Revoke current token and any tokens tied to the old code

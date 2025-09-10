@@ -20,11 +20,16 @@ const TOKEN_LIFETIME_MS = 1000 * 60 * 60 * 24 * 365; // 12 months
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 const RATE_LIMIT_MAX = 5;
 const rateLimitMap = new Map(); // { ip+code: [timestamps] }
-const ALLOW_ORIGINS = (process.env.ALLOW_ORIGINS || '')
+let ALLOW_ORIGINS = (process.env.ALLOW_ORIGINS || '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+// Ensure required origins are present (non-destructive; preserves *)
+for (const reqOrigin of ['https://api.aurasync.info', 'chrome-extension://*']) {
+  if (!ALLOW_ORIGINS.includes(reqOrigin)) ALLOW_ORIGINS.push(reqOrigin);
+}
 const CORS_HAS_WILDCARD = ALLOW_ORIGINS.includes('*');
+const CORS_HAS_EXT_WILDCARD = ALLOW_ORIGINS.includes('chrome-extension://*');
 console.info('[ENV] DATABASE_URL set?', !!process.env.DATABASE_URL);
 
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
@@ -257,6 +262,9 @@ app.use((req, res, next) => {
     allowed = true;
   } else if (ALLOW_ORIGINS.includes(origin)) {
     // Exact match including chrome-extension://<ID>
+    allowed = true;
+  } else if (CORS_HAS_EXT_WILDCARD && origin.startsWith('chrome-extension://')) {
+    // Allow any Chrome extension origin when chrome-extension://* is configured
     allowed = true;
   }
 

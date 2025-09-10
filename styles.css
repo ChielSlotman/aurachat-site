@@ -258,3 +258,10 @@ stripe-pricing-table {
 iframe[title="Stripe Pricing Table"] {
   background: transparent !important;
 }
+/* Blend wrapper to avoid white gutters injected by Stripe */
+.pricing-embed {
+  background: radial-gradient(60% 60% at 50% 0%, rgba(162,60,255,0.08), rgba(0,0,0,0) 60%)
+              , transparent;
+  padding: 0 8px;
+  border-radius: 12px;
+}

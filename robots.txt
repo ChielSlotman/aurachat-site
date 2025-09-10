@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://aurasync.info/sitemap.xml

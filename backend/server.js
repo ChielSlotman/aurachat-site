@@ -12,8 +12,20 @@ const path = require('path');
 const crypto = require('crypto');
 const { randomUUID } = require('crypto');
 require('dotenv').config();
+// Strict env checks in production
+const REQUIRED_ENVS = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'];
+if (process.env.NODE_ENV === 'production') {
+  for (const k of REQUIRED_ENVS) {
+    if (!process.env[k]) {
+      console.error(`Missing env ${k}`);
+      process.exit(1);
+    }
+  }
+}
+const VERSION = process.env.APP_VERSION || 'dev';
 const { Pool } = require('pg');
 const Stripe = require('stripe');
+const argon2 = require('argon2');
 // Ensure fetch is available (Node 18+ has global fetch)
 const _fetch = (typeof fetch !== 'undefined') ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
@@ -47,9 +59,11 @@ app.use(helmet({
 app.use(compression());
 // Logger
 const log = pino();
+function maskEmail(e){ return e ? String(e).replace(/(.).+(@.+)/,'$1***$2') : ''; }
 app.use((req, res, next) => {
   const id = req.get('X-Request-Id');
-  log.info({ id, method: req.method, path: req.path, ip: req.ip }, 'req');
+  const maybeEmail = (req.body && (req.body.email || req.body.customer_id || req.body.customer || '')) || '';
+  log.info({ id, method: req.method, path: req.path, ip: req.ip, email: maskEmail(maybeEmail) }, 'req');
   const end = res.end;
   res.end = function (...args) {
     log.info({ id, status: res.statusCode }, 'res');
@@ -95,7 +109,6 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
-const VERSION = '0.1.0';
 
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
 console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
@@ -153,12 +166,28 @@ async function initStorage() {
     await pool.query(ddl);
   // Ensure new columns exist without breaking existing databases
   await pool.query('ALTER TABLE tokens ADD COLUMN IF NOT EXISTS email TEXT');
+    // Hashing migration columns
+    await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS code_hash TEXT");
+    await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'");
+    await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days')");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS purchase_events (
         id SERIAL PRIMARY KEY,
         session_id TEXT UNIQUE NOT NULL,
         email TEXT,
         created_at BIGINT NOT NULL
+      )`);
+    // New idempotency tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS processed_events (
+        id TEXT PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT now()
+      )`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchases (
+        session_id TEXT PRIMARY KEY,
+        email TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
       )`);
     // Seed demo code if not present
     await pool.query('INSERT INTO codes (code, redeemed, created_at) VALUES ($1, FALSE, $2) ON CONFLICT (code) DO NOTHING', ['DEMO-AURASYNC-1234', Date.now()]);
@@ -179,26 +208,24 @@ async function dbCreateCodes(n, note) {
   const nowMs = Date.now();
   if (pool) {
     for (let i = 0; i < n; i++) {
-      let code;
-      // ensure unique code format DEMO-AURASYNC-####
+      // Secure random raw code; ensure uniqueness against legacy code column for now
+      let raw;
       while (true) {
-        const num = Math.floor(Math.random() * 10000);
-        code = `DEMO-AURASYNC-${String(num).padStart(4, '0')}`;
-        const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1', [code]);
+        raw = crypto.randomBytes(16).toString('base64url');
+        const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1', [raw]);
         if (rows.length === 0) break;
       }
-      await pool.query('INSERT INTO codes (code, redeemed, note, created_at) VALUES ($1, FALSE, $2, $3)', [code, note || '', nowMs]);
-      codes.push(code);
+      const hash = await argon2.hash(raw);
+      await pool.query('INSERT INTO codes (code, code_hash, redeemed, note, created_at) VALUES ($1, $2, FALSE, $3, $4)', [raw, hash, note || '', nowMs]);
+      codes.push(raw);
     }
   } else {
     for (let i = 0; i < n; i++) {
       let code;
-      do {
-        const num = Math.floor(Math.random() * 10000);
-        code = `DEMO-AURASYNC-${String(num).padStart(4, '0')}`;
-      } while (mem.codes.has(code));
+      do { code = crypto.randomBytes(16).toString('base64url'); } while (mem.codes.has(code));
       const id = mem.nextId.code++;
-      mem.codes.set(code, { id, code, redeemed: false, note: note || '', created_at: nowMs, redeemed_at: null, origin: '' });
+      const code_hash = await argon2.hash(code);
+      mem.codes.set(code, { id, code, code_hash, status: 'active', expires_at: Date.now() + 365*24*60*60*1000, redeemed: false, note: note || '', created_at: nowMs, redeemed_at: null, origin: '' });
       codes.push(code);
     }
   }
@@ -223,9 +250,18 @@ async function dbRedeem(codeStr, origin, email) {
         await client.query('ROLLBACK');
         return { error: 'already_redeemed' };
       }
+      // Backfill hash if missing
+      if (!c.code_hash && c.code) {
+        try {
+          const h = await argon2.hash(c.code);
+          await client.query('UPDATE codes SET code_hash=$1 WHERE id=$2', [h, c.id]);
+        } catch {}
+      }
       const insTok = await client.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, code_id, email) VALUES ($1, TRUE, $2, $3, FALSE, $4, $5) RETURNING id', [token, nowMs, expiresAt, c.id, (email || '').toLowerCase()]);
       const tokId = insTok.rows[0].id;
       await client.query('UPDATE codes SET redeemed=TRUE, redeemed_at=$1, origin=$2 WHERE id=$3', [nowMs, origin || '', c.id]);
+      // Optional: clear legacy code after redemption
+      try { await client.query('UPDATE codes SET code=NULL WHERE id=$1', [c.id]); } catch {}
       await client.query('INSERT INTO redemptions (code_id, token_id, origin, created_at) VALUES ($1, $2, $3, $4)', [c.id, tokId, origin || '', nowMs]);
       await client.query('COMMIT');
       return { token, premium: true };
@@ -239,9 +275,10 @@ async function dbRedeem(codeStr, origin, email) {
     const c = mem.codes.get(codeStr);
     if (!c) return { error: 'invalid_code' };
     if (c.redeemed) return { error: 'already_redeemed' };
-    c.redeemed = true;
+  c.redeemed = true;
     c.redeemed_at = nowMs;
     c.origin = origin || '';
+  try { c.code = null; } catch {}
     const tokenId = mem.nextId.token++;
     mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id, email: (email || '').toLowerCase() });
     const redId = mem.nextId.redemption++;
@@ -456,6 +493,9 @@ app.use((req, res, next) => {
 });
 
 // --- Routes ---
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true, version: VERSION, uptime: process.uptime(), now: new Date().toISOString() });
+});
 app.get('/health', async (req, res) => {
   try {
     if (pool) {
@@ -543,6 +583,13 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
       console.error(`[WH2 ${requestId}] bad signature:`, err?.message);
       return res.status(400).send('Bad signature');
     }
+    const evtId = event.id;
+    // DB-backed idempotency for events
+    if (await hasProcessedEvent(evtId)) {
+      console.info(`[WH2 ${requestId}] duplicate event ${evtId}`);
+      return res.json({ received: true, idempotent: true });
+    }
+    await recordProcessedEvent(evtId);
     const type = event.type;
     if (type !== 'checkout.session.completed') {
       console.info(`[WH2 ${requestId}] ignore ${type}`);
@@ -568,12 +615,11 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
     const nowMs = Date.now();
     // Idempotency: ensure we process a given session once
     if (pool) {
-      const { rows } = await pool.query('SELECT 1 FROM purchase_events WHERE session_id=$1', [sessionId]);
-      if (rows.length) {
-        console.info(`[WH2 ${requestId}] already processed ${sessionId}`);
+      if (await hasPurchase(sessionId)) {
+        console.info(`[WH2 ${requestId}] already purchased ${sessionId}`);
         return res.json({ received: true, idempotent: true });
       }
-      // Issue code and record event atomically
+      // Issue code and record purchase atomically
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -581,7 +627,7 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
         const codes = await dbCreateCodes(1, email);
         const code = codes[0];
         if (last.rows.length) await dbRevokeTokensByCodeId(last.rows[0].id);
-        await client.query('INSERT INTO purchase_events (session_id, email, created_at) VALUES ($1, $2, $3)', [sessionId, email, nowMs]);
+        await client.query('INSERT INTO purchases (session_id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING', [sessionId, email]);
         await client.query('COMMIT');
         console.info(`[WH2 ${requestId}] issued code for ${email}`);
         await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
@@ -595,15 +641,15 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
       }
     } else {
       // Memory idempotency
-      if (!mem.purchase_events) mem.purchase_events = new Set();
-      if (mem.purchase_events.has(sessionId)) {
+      if (!mem.purchases) mem.purchases = new Set();
+      if (mem.purchases.has(sessionId)) {
         return res.json({ received: true, idempotent: true });
       }
       const last = await dbLatestCodeForEmail(email);
       const codes = await dbCreateCodes(1, email);
       const code = codes[0];
       if (last && last.id) await dbRevokeTokensByCodeId(last.id);
-      mem.purchase_events.add(sessionId);
+      mem.purchases.add(sessionId);
       await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
       return res.json({ received: true });
     }
@@ -630,6 +676,49 @@ app.post('/create-checkout-session', async (req, res) => {
     return res.status(500).json({ error: 'server_error' });
   }
 });
+
+// Idempotency helpers
+async function hasProcessedEvent(id) {
+  if (pool) {
+    const { rows } = await pool.query('SELECT 1 FROM processed_events WHERE id=$1', [id]);
+    return rows.length > 0;
+  } else {
+    if (!mem.processed_events) mem.processed_events = new Set();
+    return mem.processed_events.has(id);
+  }
+}
+async function recordProcessedEvent(id) {
+  if (pool) {
+    await pool.query('INSERT INTO processed_events (id) VALUES ($1) ON CONFLICT DO NOTHING', [id]);
+  } else {
+    if (!mem.processed_events) mem.processed_events = new Set();
+    mem.processed_events.add(id);
+  }
+}
+async function hasPurchase(sessionId) {
+  if (pool) {
+    const { rows } = await pool.query('SELECT 1 FROM purchases WHERE session_id=$1', [sessionId]);
+    if (rows.length === 0) {
+      // Back-compat with old table purchase_events if present
+      try {
+        const r2 = await pool.query('SELECT 1 FROM purchase_events WHERE session_id=$1', [sessionId]);
+        return r2?.rows?.length > 0;
+      } catch {}
+    }
+    return rows.length > 0;
+  } else {
+    if (!mem.purchases) mem.purchases = new Set();
+    return mem.purchases.has(sessionId);
+  }
+}
+async function recordPurchase(sessionId, email) {
+  if (pool) {
+    await pool.query('INSERT INTO purchases (session_id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING', [sessionId, email]);
+  } else {
+    if (!mem.purchases) mem.purchases = new Set();
+    mem.purchases.add(sessionId);
+  }
+}
 
 // POST /activate { session_id }
 // Apply rate limits
@@ -682,6 +771,19 @@ app.post('/activate', validate(ActivateSchema), async (req, res) => {
     const isStripeErr = err?.type && String(err.type).toLowerCase().includes('stripe');
     console.error('Activate error:', err);
     return res.status(isStripeErr ? 502 : 500).json({ error: 'Activation temporarily unavailable' });
+  }
+});
+
+// Stripe Billing Portal
+const BillingSchema = z.object({ customer_id: z.string().min(5).max(200) });
+app.post('/billing-portal', validate(BillingSchema), async (req, res) => {
+  try {
+    if (!stripe) return res.status(500).json({ error: 'Portal unavailable' });
+    const return_url = 'https://aurasync.info/pricing/';
+    const portal = await stripe.billingPortal.sessions.create({ customer: req.valid.customer_id, return_url });
+    res.json({ url: portal.url });
+  } catch (e) {
+    res.status(500).json({ error: 'Portal unavailable' });
   }
 });
 

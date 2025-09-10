@@ -33,3 +33,25 @@ The site includes:
    - After checkout, the user will land on `success.html`, copy the activation code, open the AuraChat extension, and paste the code.
 
 Enjoy!
+
+## Backend (server)
+
+There is an optional Node/Express backend in `backend/` that handles code issuance and Stripe webhooks.
+
+Endpoints:
+
+- POST /create-checkout-session
+- POST /activate
+- POST /redeem
+- GET /status
+- POST /lost-code
+- GET /debug/stripe
+- POST /stripe/webhook (signature-verified, idempotent)
+- GET /healthz (ok/version/uptime/now)
+- POST /billing-portal (Stripe customer portal)
+
+In production, required envs are enforced: STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET.
+
+## SEO
+
+Static files `robots.txt` and `sitemap.xml` are included at the web root.

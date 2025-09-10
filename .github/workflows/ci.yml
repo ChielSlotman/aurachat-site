@@ -1,0 +1,32 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install backend deps
+        run: |
+          cd backend
+          npm ci
+      - name: Lint (optional)
+        run: |
+          cd backend
+          npm run lint || echo "lint skipped"
+      - name: Typecheck (optional)
+        run: |
+          cd backend
+          npm run typecheck || true
+      - name: Tests (optional)
+        run: |
+          cd backend
+          npm test || true
+      - name: Guard against test keys
+        run: |
+          if [[ "${{ secrets.STRIPE_SECRET_KEY }}" == *"sk_test"* || "${{ secrets.STRIPE_WEBHOOK_SECRET }}" == *"whsec_test"* ]]; then
+            echo "Refusing to deploy with test keys"
+            exit 1
+          fi

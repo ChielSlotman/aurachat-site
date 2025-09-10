@@ -490,6 +490,24 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Create a Stripe Checkout Session (subscription)
+app.post('/create-checkout-session', async (req, res) => {
+  try {
+    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: 'price_1S4FmS1XlsSTEaa9BRFZCCUx', quantity: 1 }],
+      customer_creation: 'always',
+      success_url: 'https://aurachatapp.github.io/aurachat-premium/success.html?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: 'https://aurachatapp.github.io/aurachat-premium/cancel.html',
+    });
+    return res.json({ id: session.id, url: session.url });
+  } catch (e) {
+    console.error('Create checkout session error:', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // POST /redeem { code }
 app.post('/redeem', async (req, res) => {
   try {

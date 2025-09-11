@@ -166,104 +166,131 @@ const mem = {
 
 async function initStorage() {
   if (pool) {
-    // Create tables if missing
-    const ddl = `
-    CREATE TABLE IF NOT EXISTS codes (
-      id SERIAL PRIMARY KEY,
-      code TEXT UNIQUE NOT NULL,
-      redeemed BOOLEAN NOT NULL DEFAULT FALSE,
-      note TEXT,
-      created_at BIGINT NOT NULL,
-      redeemed_at BIGINT,
-      origin TEXT
-    );
-    CREATE TABLE IF NOT EXISTS tokens (
-      id SERIAL PRIMARY KEY,
-      token TEXT UNIQUE NOT NULL,
-      premium BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at BIGINT NOT NULL,
-      expires_at BIGINT NOT NULL,
-      revoked BOOLEAN NOT NULL DEFAULT FALSE,
-      code_id INTEGER REFERENCES codes(id) ON DELETE SET NULL
-    );
-    CREATE TABLE IF NOT EXISTS redemptions (
-      id SERIAL PRIMARY KEY,
-      code_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,
-      token_id INTEGER REFERENCES tokens(id) ON DELETE CASCADE,
-      origin TEXT,
-      created_at BIGINT NOT NULL
-    );`;
-    await pool.query(ddl);
-  // Ensure new columns exist without breaking existing databases
-  await pool.query('ALTER TABLE tokens ADD COLUMN IF NOT EXISTS email TEXT');
-    // Hashing migration columns
-    await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS code_hash TEXT");
-  await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'");
-    await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days')");
-  await pool.query("ALTER TABLE codes ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ");
+    // Helper to run DDL with clear logs
+    const run = async (sql, label) => {
+      try {
+        await pool.query(sql);
+        log.info({ label }, '[DB] bootstrap ok');
+      } catch (err) {
+        log.error({ err, sql }, `[DB] bootstrap failed: ${label}`);
+        throw err;
+      }
+    };
+
+    // Create tables if missing (schema-qualified, single-table names, no dotted identifiers)
+    await run(`
+      CREATE TABLE IF NOT EXISTS public.codes (
+        id SERIAL PRIMARY KEY,
+        code TEXT UNIQUE NOT NULL,
+        redeemed BOOLEAN NOT NULL DEFAULT FALSE,
+        note TEXT,
+        created_at BIGINT NOT NULL,
+        redeemed_at BIGINT,
+        origin TEXT,
+        code_hash TEXT,
+        status TEXT DEFAULT 'active',
+        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),
+        revoked_at TIMESTAMPTZ
+      )`, 'create codes table');
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS public.tokens (
+        id SERIAL PRIMARY KEY,
+        token TEXT UNIQUE NOT NULL,
+        premium BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at BIGINT NOT NULL,
+        expires_at BIGINT NOT NULL,
+        revoked BOOLEAN NOT NULL DEFAULT FALSE,
+        code_id INTEGER REFERENCES public.codes(id) ON DELETE SET NULL,
+        email TEXT
+      )`, 'create tokens table');
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS public.redemptions (
+        id SERIAL PRIMARY KEY,
+        code_id INTEGER REFERENCES public.codes(id) ON DELETE CASCADE,
+        token_id INTEGER REFERENCES public.tokens(id) ON DELETE CASCADE,
+        origin TEXT,
+        created_at BIGINT NOT NULL
+      )`, 'create redemptions table');
+
     // Ensure licenses table exists for activation bookkeeping
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS licenses (
+    await run(`
+      CREATE TABLE IF NOT EXISTS public.licenses (
         email TEXT PRIMARY KEY,
         plan TEXT,
         active BOOLEAN,
         activated_at TIMESTAMPTZ
-      )`);
-    // One-active-per-email (using codes.note as email during migration). Create with cleanup and retry.
-    try {
-      await pool.query('DROP INDEX IF EXISTS public.codes_active_unique');
-      await pool.query("CREATE UNIQUE INDEX public.codes_active_unique ON public.codes (note) WHERE status = 'active'");
-    } catch (e) {
-      if (e && (e.code === '23505' || e.code === '42P07')) {
-        console.warn('[DB] Active index create conflict; normalizing and revoking older active per email, then retrying');
-        // 1) normalize emails
-        await pool.query("UPDATE public.codes SET note = LOWER(TRIM(note)) WHERE note IS NOT NULL");
-        // 2) revoke older active codes (keep most recent)
-        await pool.query(`WITH ranked AS (
-          SELECT id, note, status, created_at,
-                 ROW_NUMBER() OVER (PARTITION BY note ORDER BY created_at DESC) AS rn
-          FROM public.codes
-          WHERE status = 'active'
-        )
-        UPDATE public.codes c
-           SET status = 'revoked', revoked_at = NOW()
-          FROM ranked r
-         WHERE c.id = r.id
-           AND r.rn > 1`);
-        // 3) recreate index
-        await pool.query('DROP INDEX IF EXISTS public.codes_active_unique');
-        await pool.query("CREATE UNIQUE INDEX public.codes_active_unique ON public.codes (note) WHERE status = 'active'");
-      } else {
-        console.error('[DB] Failed to create active index:', e);
-        throw e;
-      }
-    }
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS purchase_events (
+      )`, 'create licenses table');
+
+    // Back-compat tables
+    await run(`
+      CREATE TABLE IF NOT EXISTS public.purchase_events (
         id SERIAL PRIMARY KEY,
         session_id TEXT UNIQUE NOT NULL,
         email TEXT,
         created_at BIGINT NOT NULL
-      )`);
-    // New idempotency tables
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS processed_events (
+      )`, 'create purchase_events table');
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS public.processed_events (
         id TEXT PRIMARY KEY,
         created_at TIMESTAMPTZ DEFAULT now()
-      )`);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS purchases (
+      )`, 'create processed_events table');
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS public.purchases (
         session_id TEXT PRIMARY KEY,
         email TEXT,
         created_at TIMESTAMPTZ DEFAULT now()
-      )`);
+      )`, 'create purchases table');
+
+    // Useful indexes (no dots in index names)
+    await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_code ON public.codes (code)`, 'index: codes.code unique');
+    await run(`CREATE INDEX IF NOT EXISTS idx_codes_email ON public.codes (note)`, 'index: codes.email (note)');
+    await run(`CREATE INDEX IF NOT EXISTS idx_codes_used ON public.codes (redeemed)`, 'index: codes.used (redeemed)');
+    await run(`
+      CREATE INDEX IF NOT EXISTS idx_codes_active_partial
+        ON public.codes (expires_at)
+        WHERE redeemed = FALSE AND (expires_at IS NULL OR expires_at > NOW())
+    `, 'index: codes active partial');
+
+    // One-active-per-email (using status='active' and note=email during migration). Recreate safely with cleanup on conflict.
+    await run(`DROP INDEX IF EXISTS codes_active_unique`, 'drop active unique index (old)');
+    try {
+      await run(`CREATE UNIQUE INDEX IF NOT EXISTS codes_active_unique ON public.codes (note) WHERE status = 'active'`, 'create active unique index');
+    } catch (e) {
+      if (e && (e.code === '23505' || e.code === '42P07')) {
+        log.warn('[DB] Active unique index create conflict; normalizing and revoking older active per email, then retrying');
+        await run(`UPDATE public.codes SET note = LOWER(TRIM(note)) WHERE note IS NOT NULL`, 'normalize emails to lowercase');
+        await run(`
+          WITH ranked AS (
+            SELECT id, note, status, created_at,
+                   ROW_NUMBER() OVER (PARTITION BY note ORDER BY created_at DESC) AS rn
+            FROM public.codes
+            WHERE status = 'active'
+          )
+          UPDATE public.codes c
+             SET status = 'revoked', revoked_at = NOW()
+            FROM ranked r
+           WHERE c.id = r.id
+             AND r.rn > 1
+        `, 'revoke older active codes per email');
+        await run(`DROP INDEX IF EXISTS codes_active_unique`, 'drop active unique index (retry)');
+        await run(`CREATE UNIQUE INDEX IF NOT EXISTS codes_active_unique ON public.codes (note) WHERE status = 'active'`, 'create active unique index (retry)');
+      } else {
+        throw e;
+      }
+    }
+
     // Seed demo code if not present
-    await pool.query('INSERT INTO codes (code, redeemed, created_at) VALUES ($1, FALSE, $2) ON CONFLICT (code) DO NOTHING', ['DEMO-AURASYNC-1234', Date.now()]);
+    await pool.query('INSERT INTO public.codes (code, redeemed, created_at) VALUES ($1, FALSE, $2) ON CONFLICT (code) DO NOTHING', ['DEMO-AURASYNC-1234', Date.now()]);
+
     // Sanity checks for required columns to avoid runtime 25P02 errors later
     const sanity = async (table, col) => {
-      const r = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name=$1 AND column_name=$2`, [table, col]);
+      const r = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name=$2`, [table, col]);
       if (!r.rows.length) {
-        console.error(`[SCHEMA] Missing column ${table}.${col}`);
+        console.error(`[SCHEMA] Missing column public.${table}.${col}`);
         process.exit(1);
       }
     };

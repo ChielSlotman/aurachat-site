@@ -2,6 +2,7 @@
 const express = require('express');
 const helmet = require('helmet');
 const compression = require('compression');
+const bodyParser = require('body-parser');
 const rateLimit = require('express-rate-limit');
 const pino = require('pino');
 const { z } = require('zod');
@@ -29,11 +30,6 @@ const argon2 = require('argon2');
 const _fetch = (typeof fetch !== 'undefined') ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
 const app = express();
-// RAW body only for Stripe webhook so signature verification works
-app.use('/stripe/webhook', express.raw({ type: 'application/json' }));
-// For all other routes use JSON parsers
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 // Request IDs
 app.use((req, res, next) => { res.setHeader('X-Request-Id', crypto.randomUUID()); next(); });
 // Security headers & CSP
@@ -56,8 +52,7 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: 'same-origin' },
   crossOriginResourcePolicy: { policy: 'same-origin' }
 }));
-// Compression
-app.use(compression());
+// (Compression mounted after webhook to avoid touching raw body)
 // Logger
 const log = pino();
 function maskEmail(e){ return e ? String(e).replace(/(.).+(@.+)/,'$1***$2') : ''; }
@@ -702,8 +697,8 @@ app.get('/debug/stripe', async (_req, res) => {
 
 // (Removed legacy /webhook handler)
 
-// Stripe webhook (idempotent code issuance)
-app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+// Stripe webhook (idempotent code issuance) — must be before express.json()
+app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const requestId = crypto.randomUUID();
   try {
     if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(500).json({ error: 'webhook_not_configured' });
@@ -715,12 +710,15 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
       return res.status(400).send('Bad signature');
     }
     const evtId = event.id;
-    // DB-backed idempotency for events
-    if (await hasProcessedEvent(evtId)) {
-      console.info(`[WH2 ${requestId}] duplicate event ${evtId}`);
-      return res.json({ received: true, idempotent: true });
+    // DB-backed idempotency: insert-once and bail if duplicate
+    const firstTime = await markProcessedOnce(evtId).catch((e) => {
+      log.error({ err: String(e?.message || e) }, '[WH] processed mark failed');
+      return false;
+    });
+    if (!firstTime) {
+      console.info(`[WH2 ${requestId}] duplicate or mark-failed event ${evtId}`);
+      return res.sendStatus(200);
     }
-    await recordProcessedEvent(evtId);
     const type = event.type;
     if (type === 'checkout.session.completed') {
       const sessObj = event.data?.object;
@@ -779,7 +777,8 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
         return res.sendStatus(200);
       } catch (err) {
         log.error({ err: String(err?.message || err), type, mode, sessionId }, '[WH] error issuing license');
-        return res.status(500).json({ error: 'server_error' });
+        // Do not throw; Stripe will stop retrying
+        return res.sendStatus(200);
       }
     }
 
@@ -797,12 +796,19 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
 
     // Ignore other events
     console.info(`[WH2 ${requestId}] ignore ${type}`);
-    return res.json({ received: true });
+  return res.json({ received: true });
   } catch (e) {
-    console.error('[WH2] error', e);
-    return res.status(500).end();
+  console.error('[WH2] error', e);
+  // Do not cause Stripe retries on unexpected errors
+  return res.sendStatus(200);
   }
 });
+
+// After webhook: global parsers for JSON and urlencoded
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+// Compression
+app.use(compression());
 
 // Create a Stripe Checkout Session (subscription)
 app.post('/create-checkout-session', async (req, res) => {
@@ -865,15 +871,55 @@ async function recordPurchase(sessionId, email) {
   }
 }
 
+// Insert event id once; return true if newly inserted
+async function markProcessedOnce(eventId) {
+  if (pool) {
+    const r = await pool.query('INSERT INTO processed_events (id) VALUES ($1) ON CONFLICT DO NOTHING', [eventId]);
+    return r.rowCount > 0;
+  } else {
+    if (!mem.processed_events) mem.processed_events = new Set();
+    const before = mem.processed_events.size;
+    mem.processed_events.add(eventId);
+    return mem.processed_events.size > before;
+  }
+}
+
 // Issue a new license for a given plan; returns { code, token }
 async function issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionId }) {
-  const last = await dbLatestCodeForEmail(email);
-  const codes = await dbCreateCodes(1, email);
-  const code = codes[0];
-  if (last && last.id) await dbRevokeTokensByCodeId(last.id);
-  // Record purchase idempotently by session
-  await recordPurchase(sessionId, email);
-  return { code };
+  const nowMs = Date.now();
+  if (pool) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Revoke any current active code for this email to satisfy unique active index
+      await client.query("UPDATE public.codes SET status='revoked', revoked_at=NOW() WHERE note=$1 AND status='active'", [email]);
+      // Generate unique code and insert as active
+      let raw;
+      while (true) {
+        raw = crypto.randomBytes(16).toString('base64url');
+        const { rows } = await client.query('SELECT 1 FROM public.codes WHERE code=$1', [raw]);
+        if (rows.length === 0) break;
+      }
+      const hash = await argon2.hash(raw);
+      await client.query(
+        'INSERT INTO public.codes (code, code_hash, redeemed, note, created_at, status) VALUES ($1, $2, FALSE, $3, $4, $5)',
+        [raw, hash, email, nowMs, 'active']
+      );
+      await client.query('INSERT INTO public.purchases (session_id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING', [sessionId, email]);
+      await client.query('COMMIT');
+      return { code: raw };
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;
+    } finally {
+      client.release();
+    }
+  } else {
+    const codes = await dbCreateCodes(1, email);
+    const code = codes[0];
+    await recordPurchase(sessionId, email);
+    return { code };
+  }
 }
 
 async function sendLicenseEmail({ to, code, plan, mode }) {

@@ -245,15 +245,26 @@ async function initStorage() {
         created_at TIMESTAMPTZ DEFAULT now()
       )`, 'create purchases table');
 
-    // Useful indexes (no dots in index names)
+    // Useful indexes (immutable predicates; no NOW() in predicates)
     await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_code ON public.codes (code)`, 'index: codes.code unique');
+    // Note: using "note" as email placeholder during migration
     await run(`CREATE INDEX IF NOT EXISTS idx_codes_email ON public.codes (note)`, 'index: codes.email (note)');
-    await run(`CREATE INDEX IF NOT EXISTS idx_codes_used ON public.codes (redeemed)`, 'index: codes.used (redeemed)');
+    await run(`CREATE INDEX IF NOT EXISTS idx_codes_redeemed ON public.codes (redeemed)`, 'index: codes.redeemed');
     await run(`
-      CREATE INDEX IF NOT EXISTS idx_codes_active_partial
+      CREATE INDEX IF NOT EXISTS idx_codes_expires_at_notnull
         ON public.codes (expires_at)
-        WHERE redeemed = FALSE AND (expires_at IS NULL OR expires_at > NOW())
-    `, 'index: codes active partial');
+        WHERE expires_at IS NOT NULL
+    `, 'index: codes.expires_at not null');
+    await run(`
+      CREATE INDEX IF NOT EXISTS idx_codes_redeemed_expires_at_notnull
+        ON public.codes (redeemed, expires_at)
+        WHERE expires_at IS NOT NULL
+    `, 'index: codes.redeemed + expires_at (not null)');
+    await run(`
+      CREATE INDEX IF NOT EXISTS idx_codes_active_infinite
+        ON public.codes (redeemed)
+        WHERE redeemed = FALSE AND expires_at IS NULL
+    `, 'index: codes.active infinite');
 
     // One-active-per-email (using status='active' and note=email during migration). Recreate safely with cleanup on conflict.
     await run(`DROP INDEX IF EXISTS codes_active_unique`, 'drop active unique index (old)');

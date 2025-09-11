@@ -115,6 +115,21 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
+// Stripe price → plan mapping
+const PRICE_TO_PLAN = Object.fromEntries([
+  [process.env.STRIPE_PRICE_MONTHLY, 'monthly'],
+  [process.env.STRIPE_PRICE_YEARLY, 'yearly'],
+  [process.env.STRIPE_PRICE_LIFETIME, 'lifetime'],
+].filter(([k]) => k));
+const EXTRA_ALLOWED = (process.env.STRIPE_ALLOWED_PRICE_IDS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+for (const id of EXTRA_ALLOWED) if (!PRICE_TO_PLAN[id]) PRICE_TO_PLAN[id] = 'extra';
+if (Object.keys(PRICE_TO_PLAN).length === 0) {
+  console.warn('[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS');
+}
+
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
 console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
 
@@ -707,68 +722,82 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
     }
     await recordProcessedEvent(evtId);
     const type = event.type;
-    if (type !== 'checkout.session.completed') {
-      console.info(`[WH2 ${requestId}] ignore ${type}`);
-      return res.json({ received: true });
-    }
-    const session = event.data?.object;
-    const sessionId = session?.id;
-    if (!sessionId) return res.status(400).json({ error: 'missing_session' });
-    // Retrieve to be sure
-    let full;
-    try {
-      full = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['customer'] });
-    } catch (e) {
-      console.error(`[WH2 ${requestId}] retrieve failed`);
-      return res.status(502).json({ error: 'stripe_unavailable' });
-    }
-    if (!full || full.payment_status !== 'paid') {
-      console.info(`[WH2 ${requestId}] not paid`);
-      return res.status(400).json({ error: 'not_paid' });
-    }
-    const email = (full.customer_details?.email || full.customer?.email || '').toLowerCase();
-    if (!email) return res.status(400).json({ error: 'no_email' });
-    const nowMs = Date.now();
-    // Idempotency: ensure we process a given session once
-    if (pool) {
-      if (await hasPurchase(sessionId)) {
-        console.info(`[WH2 ${requestId}] already purchased ${sessionId}`);
-        return res.json({ received: true, idempotent: true });
-      }
-      // Issue code and record purchase atomically
-      const client = await pool.connect();
+    if (type === 'checkout.session.completed') {
+      const sessObj = event.data?.object;
+      const sessionId = sessObj?.id;
+      if (!sessionId) return res.status(400).json({ error: 'missing_session' });
+
+      // Retrieve full session w/ line items & product
+      let session;
       try {
-        await client.query('BEGIN');
-        const last = await client.query('SELECT id FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 1', [email]);
-        const codes = await dbCreateCodes(1, email);
-        const code = codes[0];
-        if (last.rows.length) await dbRevokeTokensByCodeId(last.rows[0].id);
-        await client.query('INSERT INTO purchases (session_id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING', [sessionId, email]);
-        await client.query('COMMIT');
-        console.info(`[WH2 ${requestId}] issued code for ${email}`);
-        await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
-        return res.json({ received: true });
+        session = await stripe.checkout.sessions.retrieve(sessionId, {
+          expand: ['line_items.data.price.product', 'subscription', 'customer', 'customer_details']
+        });
       } catch (e) {
-        await client.query('ROLLBACK');
-        console.error(`[WH2 ${requestId}] tx failed`);
+        console.error(`[WH2 ${requestId}] retrieve failed`, e?.message);
+        return res.status(502).json({ error: 'stripe_unavailable' });
+      }
+      if (!session || session.payment_status !== 'paid') {
+        console.info(`[WH2 ${requestId}] not paid`);
+        return res.status(400).json({ error: 'not_paid' });
+      }
+      const email = (session.customer_details?.email || session.customer?.email || session.customer_email || '').toLowerCase();
+      if (!email) return res.status(400).json({ error: 'no_email' });
+
+      const items = (session.line_items && session.line_items.data) ? session.line_items.data : [];
+      const plans = [];
+      for (const it of items) {
+        const priceId = it?.price?.id;
+        if (!priceId) continue;
+        const plan = PRICE_TO_PLAN[priceId];
+        if (!plan) {
+          log.warn({ priceId }, '[WH] unrecognized price id');
+          continue;
+        }
+        plans.push({ priceId, plan, quantity: it?.quantity || 1 });
+      }
+      const valid = plans.filter(p => p.plan);
+      if (valid.length === 0) {
+        log.warn({ items: items.map(i => i?.price?.id) }, '[WH] no recognized price ids');
+        return res.sendStatus(200);
+      }
+
+      const mode = session.mode; // 'subscription' | 'payment'
+      const subId = (typeof session.subscription === 'string') ? session.subscription : (session.subscription?.id || null);
+      const priceIds = items.map(i => i?.price?.id).filter(Boolean);
+
+      // Issue codes for each recognized item and quantity
+      try {
+        for (const { plan, priceId, quantity } of valid) {
+          for (let i = 0; i < quantity; i++) {
+            const info = await issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionId });
+            await sendLicenseEmail({ to: email, code: info.code, plan, mode });
+            await recordPurchaseEvent({ kind: 'checkout.session.completed', plan, priceId, mode, subId, sessionId, email });
+          }
+        }
+        log.info({ type, mode, email, priceIds }, '[WH] OK');
+        return res.sendStatus(200);
+      } catch (err) {
+        log.error({ err: String(err?.message || err), type, mode, sessionId }, '[WH] error issuing license');
         return res.status(500).json({ error: 'server_error' });
-      } finally {
-        client.release();
       }
-    } else {
-      // Memory idempotency
-      if (!mem.purchases) mem.purchases = new Set();
-      if (mem.purchases.has(sessionId)) {
-        return res.json({ received: true, idempotent: true });
-      }
-      const last = await dbLatestCodeForEmail(email);
-      const codes = await dbCreateCodes(1, email);
-      const code = codes[0];
-      if (last && last.id) await dbRevokeTokensByCodeId(last.id);
-      mem.purchases.add(sessionId);
-      await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
-      return res.json({ received: true });
     }
+
+    if (type === 'invoice.paid') {
+      const invoice = event.data?.object || {};
+      const reason = invoice.billing_reason;
+      if (reason === 'subscription_cycle') {
+        log.info({ type, reason, subscription: invoice.subscription }, '[WH] renewal processed (no new code)');
+        return res.sendStatus(200);
+      }
+      // Other invoice paid reasons can be no-ops for now
+      log.info({ type, reason }, '[WH] invoice.paid ignored');
+      return res.sendStatus(200);
+    }
+
+    // Ignore other events
+    console.info(`[WH2 ${requestId}] ignore ${type}`);
+    return res.json({ received: true });
   } catch (e) {
     console.error('[WH2] error', e);
     return res.status(500).end();
@@ -834,6 +863,31 @@ async function recordPurchase(sessionId, email) {
     if (!mem.purchases) mem.purchases = new Set();
     mem.purchases.add(sessionId);
   }
+}
+
+// Issue a new license for a given plan; returns { code, token }
+async function issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionId }) {
+  const last = await dbLatestCodeForEmail(email);
+  const codes = await dbCreateCodes(1, email);
+  const code = codes[0];
+  if (last && last.id) await dbRevokeTokensByCodeId(last.id);
+  // Record purchase idempotently by session
+  await recordPurchase(sessionId, email);
+  return { code };
+}
+
+async function sendLicenseEmail({ to, code, plan, mode }) {
+  const subject = 'Your AuraSync activation code';
+  const html = renderLicenseEmailHtml(code);
+  await sendEmail(to, subject, html);
+}
+
+async function recordPurchaseEvent({ kind, plan, priceId, mode, subId, sessionId, email }) {
+  try {
+    if (pool) {
+      await pool.query('INSERT INTO purchase_events (session_id, email, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [sessionId, email, Date.now()]);
+    }
+  } catch (_) {}
 }
 
 // POST /activate { session_id }

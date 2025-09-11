@@ -181,7 +181,7 @@ async function initStorage() {
     await run(`
       CREATE TABLE IF NOT EXISTS public.codes (
         id SERIAL PRIMARY KEY,
-        code TEXT UNIQUE NOT NULL,
+        code TEXT UNIQUE,
         redeemed BOOLEAN NOT NULL DEFAULT FALSE,
         note TEXT,
         created_at BIGINT NOT NULL,
@@ -192,6 +192,8 @@ async function initStorage() {
         expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),
         revoked_at TIMESTAMPTZ
       )`, 'create codes table');
+    // Make sure code column can be cleared post-hash backfill
+    await run(`ALTER TABLE public.codes ALTER COLUMN code DROP NOT NULL`, 'alter codes.code drop not null');
 
     await run(`
       CREATE TABLE IF NOT EXISTS public.tokens (
@@ -332,7 +334,8 @@ async function dbCreateCodes(n, note) {
         if (rows.length === 0) break;
       }
       const hash = await argon2.hash(raw);
-      await pool.query('INSERT INTO codes (code, code_hash, redeemed, note, created_at) VALUES ($1, $2, FALSE, $3, $4)', [raw, hash, note || '', nowMs]);
+  log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
+  await pool.query('INSERT INTO codes (code, code_hash, redeemed, note, created_at) VALUES ($1, $2, FALSE, $3, $4)', [raw, hash, note || '', nowMs]);
       codes.push(raw);
     }
   } else {
@@ -396,6 +399,7 @@ async function dbRedeem(codeStr, origin, email) {
       if (!ok) throw new Error('INVALID_CODE');
 
       // Create token and mark code as used
+      log.info({ params: { token, created_at: nowMs, expires_at: expiresAt, code_id: c.id, email: (email || '').toLowerCase() } }, '[DB] insert_token params');
       const insTok = await q(
         client,
         'insert_token',
@@ -403,9 +407,14 @@ async function dbRedeem(codeStr, origin, email) {
         [token, nowMs, expiresAt, c.id, (email || '').toLowerCase()]
       );
       const tokId = insTok.rows[0].id;
-  await q(client, 'update_code_used', 'UPDATE codes SET redeemed=TRUE, redeemed_at=$1, origin=$2, status = $3 WHERE id=$4', [nowMs, origin || '', 'used', c.id]);
+      log.info({ params: { redeemed_at: nowMs, origin: origin || '', status: 'used', code_id: c.id } }, '[DB] update_code_used params');
+      await q(client, 'update_code_used', 'UPDATE codes SET redeemed=TRUE, redeemed_at=$1, origin=$2, status = $3 WHERE id=$4', [nowMs, origin || '', 'used', c.id]);
       // Clear legacy plaintext if any (best effort)
-      try { await q(client, 'clear_plain', 'UPDATE codes SET code=NULL WHERE id=$1', [c.id]); } catch (_) {}
+      try {
+        log.info({ params: { code_id: c.id } }, '[DB] clear_plain params');
+        await q(client, 'clear_plain', 'UPDATE codes SET code=NULL WHERE id=$1', [c.id]);
+      } catch (_) {}
+      log.info({ params: { code_id: c.id, token_id: tokId, origin: origin || '', created_at: nowMs } }, '[DB] insert_redemption params');
       await q(client, 'insert_redemption', 'INSERT INTO redemptions (code_id, token_id, origin, created_at) VALUES ($1, $2, $3, $4)', [c.id, tokId, origin || '', nowMs]);
       // Upsert license record if email provided
       if (email) {

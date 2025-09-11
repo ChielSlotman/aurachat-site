@@ -29,9 +29,11 @@ const argon2 = require('argon2');
 const _fetch = (typeof fetch !== 'undefined') ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
 const app = express();
-// Use raw body for Stripe webhooks
-app.use('/webhook', express.raw({ type: 'application/json' }));
+// RAW body only for Stripe webhook so signature verification works
+app.use('/stripe/webhook', express.raw({ type: 'application/json' }));
+// For all other routes use JSON parsers
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 // Request IDs
 app.use((req, res, next) => { res.setHeader('X-Request-Id', crypto.randomUUID()); next(); });
 // Security headers & CSP
@@ -88,7 +90,7 @@ const RedeemSchema = z.object({
 });
 const LostCodeSchema = z.object({ email: z.string().email(), token: z.string().min(10).max(500) });
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = process.env.PORT || 3000;
 const STORE_FILE = path.join(__dirname, 'store.json');
 const ACCEPT_ANY_CODE = process.env.ACCEPT_ANY_CODE === '1';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'changeme';
@@ -119,21 +121,31 @@ console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
 // --- Database setup (Postgres with in-memory fallback) ---
 // Synchronous SSL helper (CommonJS friendly, no top-level await)
 function getPgSsl() {
-  if (String(process.env.PG_SSL_INSECURE || '').toLowerCase() === 'true') {
-    console.warn('[DB] PG SSL INSECURE MODE ENABLED (temporary)');
-    return { rejectUnauthorized: false };
+  const insecure = (process.env.PG_SSL_INSECURE || '').toLowerCase() === 'true';
+  const caInline = process.env.PG_CA_BUNDLE;
+  const caPath = process.env.PG_CA_PATH || path.join(__dirname, 'certs', 'db-ca.pem');
+  if (insecure) {
+    console.warn('PG SSL INSECURE MODE ENABLED: rejectUnauthorized=false');
+    return { require: true, rejectUnauthorized: false };
   }
-  if (process.env.PG_CA_BUNDLE) {
-    return { ca: process.env.PG_CA_BUNDLE };
+  if (caInline && caInline.trim().length > 0) {
+    console.info('Using inline CA from PG_CA_BUNDLE');
+    return { require: true, rejectUnauthorized: true, ca: caInline };
   }
-  const caPath = process.env.PGSSLROOTCERT || path.join(__dirname, 'certs', 'db-ca.pem');
   try {
-    const ca = fs.readFileSync(caPath, 'utf8');
-    return { ca };
-  } catch (e) {
-    console.warn('[DB] CA load failed; using system trust store. Msg:', e && e.message);
-    return true; // Use system CAs (secure)
+    if (fs.existsSync(caPath)) {
+      const ca = fs.readFileSync(caPath, 'utf8');
+      if (ca && ca.trim().length > 0) {
+        console.info(`Using CA file at ${caPath}`);
+        return { require: true, rejectUnauthorized: true, ca };
+      }
+    } else {
+      console.warn(`CA file not found at ${caPath}, falling back to system trust store`);
+    }
+  } catch (err) {
+    console.warn({ err }, 'Failed to load CA file, falling back to system trust store');
   }
+  return { require: true, rejectUnauthorized: true };
 }
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
@@ -626,53 +638,7 @@ app.get('/debug/stripe', async (_req, res) => {
   }
 });
 
-// --- Stripe webhook ---
-app.post('/webhook', async (req, res) => {
-  try {
-    let event = null;
-    const sig = req.headers['stripe-signature'];
-    if (STRIPE_WEBHOOK_SECRET && stripe) {
-      try {
-        event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-      } catch (err) {
-        console.error('Webhook signature verification failed:', err?.message);
-        return res.status(400).send('Bad signature');
-      }
-    } else {
-      // Fallback (dev): parse JSON directly
-      event = JSON.parse(req.body.toString('utf8'));
-    }
-
-    const type = event.type;
-    const obj = event.data?.object || {};
-    // Resolve email
-    let email = obj.customer_email || obj.customer_details?.email || obj.receipt_email || '';
-    if (!email && stripe && obj.customer) {
-      try { const cust = await stripe.customers.retrieve(obj.customer); email = cust?.email || email; } catch {}
-    }
-
-    if (type === 'checkout.session.completed' && email) {
-      const codes = await dbCreateCodes(1, email);
-      const code = codes[0];
-      console.info(`[WH] ${type} -> issued code for ${email}`);
-      await sendEmail(email, 'Your AuraSync activation code', renderLicenseEmailHtml(code));
-    } else if (type === 'invoice.paid') {
-      console.info(`[WH] invoice.paid for ${email || 'unknown'} -> no code issued`);
-    }
-
-    if (type === 'customer.subscription.deleted') {
-      if (email) {
-        await dbRevokeTokensByEmail(email);
-        console.info(`[WH] subscription deleted -> revoked tokens for ${email}`);
-      }
-    }
-
-    res.json({ received: true });
-  } catch (e) {
-    console.error('Webhook error:', e);
-    res.status(500).end();
-  }
-});
+// (Removed legacy /webhook handler)
 
 // Stripe webhook (idempotent code issuance)
 app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -1124,26 +1090,18 @@ app.post('/admin/revoke-token', async (req, res) => {
   res.json({ ok: true });
 });
 
-initStorage().then(() => {
-app.listen(PORT, () => {
-  console.log(`AuraSync backend running on http://localhost:${PORT}`);
-  console.log('Storage:', pool ? 'pg' : 'memory');
-  if (CORS_HAS_WILDCARD) {
-    console.log('CORS: wildcard * active (allowing all origins).');
-  } else if (ALLOW_ORIGINS.length === 0) {
-    console.log('CORS: ALLOW_ORIGINS not set -> allowing all (dev).');
-  } else {
-    console.log('CORS allow list (exact match):', ALLOW_ORIGINS);
+async function start() {
+  try {
+    await initStorage();
+  } catch (e) {
+    console.error('Failed to initialize storage:', e);
+    process.exit(1);
+    return;
   }
-  if (!ACCEPT_ANY_CODE) {
-    console.log('TEST_MODE: OFF');
-  } else {
-    console.log('TEST_MODE: ON');
-  }
-});
-}).catch((e) => {
-  console.error('Failed to initialize storage:', e);
-  process.exit(1);
-});
+  app.listen(PORT, () => {
+    console.log(`AuraSync backend listening on ${PORT}`);
+  });
+}
+start();
 
 module.exports = { pool };

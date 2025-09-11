@@ -472,6 +472,21 @@ async function dbRedeem(codeStr, origin, email) {
   }
 }
 
+// Compatibility wrapper used by the /redeem route; preserves current JSON error contract
+async function dbRedeemWithEmailBind({ code, email, origin }) {
+  if (!code || typeof code !== 'string') return { error: 'invalid_code' };
+  try {
+    const out = await dbRedeem(code.trim(), origin || '', email || null);
+    if (out && out.token) return { token: out.token };
+    return { error: 'redeem_failed' };
+  } catch (e) {
+    const msg = String((e && e.message) || e || '');
+    if (msg === 'INVALID_CODE') return { error: 'invalid_code' };
+    if (msg === 'EXPIRED_CODE') return { error: 'already_used_or_expired' };
+    return { error: 'redeem_failed' };
+  }
+}
+
 async function dbGetToken(tokenStr) {
   if (pool) {
     const { rows } = await pool.query('SELECT * FROM tokens WHERE token=$1', [tokenStr]);

@@ -1,3 +1,14 @@
+// Normalize email: lowercase, trim, Gmail dots/+ collapse
+function normalizeEmail(email) {
+  if (!email) return '';
+  let e = String(email).trim().toLowerCase();
+  const [user, domain] = e.split('@');
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    let local = user.split('+')[0].replace(/\./g, '');
+    e = `${local}@gmail.com`;
+  }
+  return e;
+}
 // Minimal AuraSync backend: redeem codes and check premium status
 const express = require('express');
 const helmet = require('helmet');
@@ -80,7 +91,7 @@ function validate(schema) {
 
 const ActivateSchema = z.object({ session_id: z.string().min(10).max(200) });
 const RedeemSchema = z.object({
-  email: z.string().email().transform((s) => s.trim().toLowerCase()),
+  email: z.string().email().optional(),
   code: z.string().min(8).max(200).transform((s) => s.trim())
 });
 const LostCodeSchema = z.object({ email: z.string().email(), token: z.string().min(10).max(500) });
@@ -279,7 +290,7 @@ async function initStorage() {
     `, 'index: codes.active infinite');
 
     // One-active-per-email (using status='active' and note=email during migration). Recreate safely with cleanup on conflict.
-    await run(`DROP INDEX IF EXISTS codes_active_unique`, 'drop active unique index (old)');
+  await run(`DROP INDEX IF EXISTS codes_active_unique`, 'drop active unique index (old)');
     try {
       await run(`CREATE UNIQUE INDEX IF NOT EXISTS codes_active_unique ON public.codes (note) WHERE status = 'active'`, 'create active unique index');
     } catch (e) {
@@ -375,25 +386,27 @@ async function dbRedeem(codeStr, origin, email) {
     const client = await pool.connect();
     try {
       await q(client, 'begin', 'BEGIN');
-      // Lock latest active code for this email
-      const sel = await q(
-        client,
-        'select_active_code',
-        `SELECT id, code, code_hash, redeemed, status, expires_at
-           FROM codes
-          WHERE lower(note) = $1 AND (status IS NULL OR status = 'active')
-          ORDER BY created_at DESC
-          FOR UPDATE LIMIT 1`,
-        [(email || '').toLowerCase()]
-      );
-      if (sel.rows.length === 0) { throw new Error('NO_ACTIVE_CODE'); }
-      const c = sel.rows[0];
+      // Find code by hash or plaintext across all codes
+      const selAll = await q(client, 'select_codes_any', 'SELECT id, code, code_hash, redeemed, status, expires_at, note FROM public.codes FOR UPDATE');
+      let c = null;
+      for (const r of selAll.rows) {
+        let ok = false;
+        if (r.code_hash) ok = await argon2.verify(r.code_hash, codeStr).catch(() => false);
+        if (!ok && r.code) ok = (r.code === codeStr);
+        if (ok) { c = r; break; }
+      }
+      if (!c) { throw new Error('INVALID_CODE'); }
       // Check used/expired status
       if (c.status && ['used','revoked','expired'].includes(String(c.status))) {
         throw new Error('INVALID_CODE');
       }
       if (c.redeemed === true) { throw new Error('INVALID_CODE'); }
       if (c.expires_at && new Date(c.expires_at) < new Date()) { throw new Error('EXPIRED_CODE'); }
+      // Re-bind email on first redeem if provided
+      const norm = email ? normalizeEmail(email) : null;
+      if (norm && (!c.note || normalizeEmail(c.note) !== norm)) {
+        await q(client, 'bind_email', 'UPDATE public.codes SET note=$1 WHERE id=$2', [norm, c.id]);
+      }
       // Verify hash or legacy plaintext
       let ok = false;
       if (c.code_hash) {
@@ -414,7 +427,7 @@ async function dbRedeem(codeStr, origin, email) {
         client,
         'insert_token',
         'INSERT INTO tokens (token, premium, created_at, expires_at, revoked, code_id, email) VALUES ($1, TRUE, $2, $3, FALSE, $4, $5) RETURNING id',
-        [token, nowMs, expiresAt, c.id, (email || '').toLowerCase()]
+        [token, nowMs, expiresAt, c.id, norm || (c.note || '').toLowerCase()]
       );
       const tokId = insTok.rows[0].id;
       log.info({ params: { redeemed_at: nowMs, origin: origin || '', status: 'used', code_id: c.id } }, '[DB] update_code_used params');
@@ -739,7 +752,7 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
         console.info(`[WH2 ${requestId}] not paid`);
         return res.status(400).json({ error: 'not_paid' });
       }
-      const email = (session.customer_details?.email || session.customer?.email || session.customer_email || '').toLowerCase();
+  const email = normalizeEmail(session.customer_details?.email || session.customer?.email || session.customer_email || '');
       if (!email) return res.status(400).json({ error: 'no_email' });
 
       const items = (session.line_items && session.line_items.data) ? session.line_items.data : [];
@@ -1006,67 +1019,48 @@ app.post('/billing-portal', validate(BillingSchema), async (req, res) => {
 // POST /redeem { code }
 app.post('/redeem', validate(RedeemSchema), async (req, res) => {
   try {
-  const { email, code } = req.valid;
+    const { email, code } = req.valid;
+    if (!code) return res.status(400).json({ error: 'missing_code' });
+    const normEmail = email ? normalizeEmail(email) : null;
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
-  // 5-minute rate limit keyed by IP+email (fallback to code if no email)
-  const REDEEM_WINDOW_MS = 5 * 60 * 1000;
-  const key = `${ip}:${email || code}`;
-  const nowMs = now();
+    const REDEEM_WINDOW_MS = 5 * 60 * 1000;
+    const key = `${ip}:${normEmail || code}`;
+    const nowMs = now();
     // --- Developer master code: infinite use, never expires ---
     if (DEV_MASTER_CODE && code === DEV_MASTER_CODE) {
       const token = `dev-${randomUUID()}`;
       try {
         if (typeof saveToken === 'function') {
-          await saveToken({ token, code_id: null, origin: body.origin || 'extension', note: 'dev_master', dev: true });
+          await saveToken({ token, code_id: null, origin: req.headers.origin || 'extension', note: 'dev_master', dev: true });
         }
       } catch (_) {}
       return res.json({ token, premium: true, dev: true });
     }
     // --- Rate limit ---
-  let arr = rateLimitMap.get(key) || [];
-  arr = arr.filter(ts => nowMs - ts < REDEEM_WINDOW_MS);
+    let arr = rateLimitMap.get(key) || [];
+    arr = arr.filter(ts => nowMs - ts < REDEEM_WINDOW_MS);
     if (arr.length >= RATE_LIMIT_MAX) {
       return res.status(429).json({ error: 'Too many attempts, try again later.' });
     }
     arr.push(nowMs);
     rateLimitMap.set(key, arr);
 
-  if (ACCEPT_ANY_CODE) {
-      const token = crypto.randomUUID();
-      const expiresAt = nowMs + TOKEN_LIFETIME_MS;
-      if (pool) {
-        // create a "free" token not linked to a code
-    await pool.query('INSERT INTO tokens (token, premium, created_at, expires_at, revoked, email) VALUES ($1, TRUE, $2, $3, FALSE, $4)', [token, nowMs, expiresAt, email]);
-      } else {
-        const id = mem.nextId.token++;
-    mem.tokens.set(token, { id, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: null, email });
-      }
-      console.info(`[REDEEM] ANY_CODE ip=${ip} code=${code} => token=...${tokenTail(token)}`);
-      return res.json({ token, premium: true });
-    } else {
-      console.log('TEST_MODE: OFF (/redeem)');
-    }
-
-    if (!code) return res.status(400).json({ error: 'Invalid or expired code.' });
+    // Only code is required; email is optional and only used for first-time binding
     const origin = req.headers.origin || '';
+    let result;
     try {
-      const result = await dbRedeem(code, origin, email);
-      if (result?.error) {
-        return res.status(400).json({ error: 'Invalid or expired code.' });
-      }
-      console.info(`[REDEEM] ip=${ip} code=*** => token=...${tokenTail(result.token)} at ${new Date(nowMs).toISOString()} origin=${origin}`);
-      return res.json({ token: result.token, premium: true });
+      result = await dbRedeemWithEmailBind({ code, email: normEmail, origin });
     } catch (e) {
-      const msg = String(e?.message || '');
-      if (["NO_ACTIVE_CODE","INVALID_CODE","EXPIRED_CODE"].includes(msg)) {
-        return res.status(400).json({ error: 'Invalid or expired code.' });
-      }
-      log.error({ err: msg }, 'redeem_failed');
-      return res.status(500).json({ error: 'Server error. Please try again in a minute.' });
+      log.error({ err: String(e?.message || e) }, 'redeem_failed');
+      return res.status(500).json({ error: 'redeem_failed' });
     }
+    if (result?.error === 'invalid_code') return res.status(400).json({ error: 'invalid_code' });
+    if (result?.error === 'already_used_or_expired') return res.status(400).json({ error: 'already_used_or_expired' });
+    if (!result?.token) return res.status(500).json({ error: 'redeem_failed' });
+    return res.json({ token: result.token, premium: true });
   } catch (err) {
-    console.error('Redeem error:', err);
-    res.status(500).json({ error: 'Server error' });
+    log.error({ err: String(err?.message || err) }, 'redeem_failed');
+    res.status(500).json({ error: 'redeem_failed' });
   }
 });
 

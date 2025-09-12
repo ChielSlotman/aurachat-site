@@ -2,8 +2,8 @@
 *{box-sizing:border-box}
 :root{
   --primary:#7c3aed; /* violet */
-  --primary-2:#22d3ee; /* cyan */
-  --primary-3:#06b6d4; /* teal-ish for depth */
+  --primary-2:#ec4899; /* pink */
+  --primary-3:#22d3ee; /* aqua */
   --bg:#0b0c12; /* deep near-black */
   --text:#e5e7eb; /* slate-200 */
   --muted:#a1a7b3; /* slate-400 */
@@ -22,12 +22,8 @@ header.nav .links a.active{color:#fff}
 header.nav .logo{display:flex; align-items:center; gap:.5rem}
 header.nav .logo span{font-weight:800}
 /* Buttons */
-.btn{display:inline-flex; align-items:center; justify-content:center; padding:.8rem 1.1rem; border-radius:.75rem; font-weight:700; text-decoration:none; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:#fff; transition: background .25s, color .25s, border-color .25s, box-shadow .25s, transform .18s}
-.btn:hover{transform:translateY(-1px)}
-.btn-primary{background:linear-gradient(90deg,var(--primary),var(--primary-2)); color:#fff; border-color:transparent; box-shadow:0 8px 24px rgba(34,211,238,.22), 0 0 0 1px rgba(124,58,237,.22) inset}
-.btn-primary:hover{filter:brightness(1.05); box-shadow:0 12px 32px rgba(34,211,238,.28), 0 0 0 1px rgba(124,58,237,.35) inset}
-.btn-outline{background:transparent; color:#e5e7eb; border:1px solid var(--border)}
-.btn-outline:hover{border-color:rgba(124,58,237,.6); box-shadow:0 0 24px rgba(124,58,237,.25)}
+.btn{display:inline-flex; align-items:center; justify-content:center; padding:.8rem 1.1rem; border-radius:.75rem; font-weight:700; text-decoration:none; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:#fff}
+.btn-primary{background:linear-gradient(90deg,var(--primary),var(--primary-2)); color:#fff; border-color:transparent; box-shadow:0 8px 24px rgba(124,58,237,.28)}
 .btn-ghost{background:transparent; color:#fff}
 /* Hero */
 .hero{position:relative; overflow:hidden}
@@ -43,11 +39,7 @@ header.nav .logo span{font-weight:800}
 .b1{width:380px; height:380px; left:-40px; top:-40px; background:radial-gradient(circle at 30% 30%, rgba(124,58,237,.45), transparent 60%)}
 .b2{width:420px; height:420px; right:-30px; top:40px; background:radial-gradient(circle at 60% 40%, rgba(236,72,153,.38), transparent 60%)}
 .b3{width:360px; height:360px; right:80px; bottom:-60px; background:radial-gradient(circle at 40% 60%, rgba(34,211,238,.35), transparent 60%)}
-.art::after{content:''; position:absolute; inset:0; border-radius:1rem; background:linear-gradient(180deg, rgba(8,8,12,.28), rgba(8,8,12,.12)); border:1px solid var(--border); box-shadow:0 10px 35px rgba(0,0,0,.35) inset}
-.no-frame::after{display:none}
-.aura-pulse{position:relative}
-.aura-pulse::before{content:''; position:absolute; inset:-8%; background:radial-gradient(closest-side, rgba(124,58,237,.45), rgba(34,211,238,.25), transparent 70%); filter:blur(32px); z-index:0; animation:aura 6s ease-in-out infinite alternate}
-@keyframes aura{0%{opacity:.7; transform:scale(1)} 100%{opacity:.95; transform:scale(1.06)}}
+.art::after{content:''; position:absolute; inset:0; border-radius:1rem; background:linear-gradient(180deg, rgba(8,8,12,.45), rgba(8,8,12,.2)); border:1px solid var(--border); box-shadow:0 10px 35px rgba(0,0,0,.35) inset}
 /* Optional hero image when provided */
 .art img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; border-radius:1rem}
 /* Features */
@@ -61,13 +53,4 @@ header.nav .logo span{font-weight:800}
 footer{border-top:1px solid var(--border); color:#9aa4b2}
 footer .inner{display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:1.25rem 0; flex-wrap:wrap}
 footer a{color:inherit; text-decoration:none}
-
-/* Brand gradient utilities and subtle glows */
-.brand-text{background:linear-gradient(90deg,var(--primary),var(--primary-2)); -webkit-background-clip:text; background-clip:text; color:transparent}
-.aura-glow{filter:drop-shadow(0 0 12px rgba(124,58,237,.35)) drop-shadow(0 0 22px rgba(34,211,238,.22))}
-.section-title{letter-spacing:.2px}
-
-/* Link hover polish */
-a{transition:color .2s, text-shadow .25s}
-a:hover{color:#fff; text-shadow:0 0 12px rgba(124,58,237,.25)}
 /* Keep default dark utility classes from assets/site.css intact (no overrides here) */

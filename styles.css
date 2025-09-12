@@ -44,7 +44,7 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* Subtle hint text for extension easter egg */
 .hint-extension{color:#9aa4b2; font-size:.9rem; opacity:.9}
 /* Art blobs */
-.hero .art{position:relative; height:360px; border-radius:1rem; overflow:visible; border:none; box-shadow:none; background:transparent; margin-bottom:-120px}
+.hero .art{position:relative; height:360px; border-radius:1rem; overflow:visible; border:none; box-shadow:none; background:transparent; margin-bottom:-48px}
 .blob{position:absolute; filter:blur(50px); opacity:.75}
 .b1{width:380px; height:380px; left:-40px; top:-40px; background:radial-gradient(circle at 30% 30%, rgba(124,58,237,.45), transparent 60%)}
 .b2{width:420px; height:420px; right:-30px; top:40px; background:radial-gradient(circle at 60% 40%, rgba(236,72,153,.38), transparent 60%)}
@@ -62,10 +62,10 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 .hero .art:hover .art-hint{opacity:1; transform:translateY(0)}
 
 /* --- Isometric cube effect inside hero art --- */
-.hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(36px); pointer-events:auto}
+.hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(16px); pointer-events:auto}
 .hero .art .iso-container{animation:none}
-/* Title above the cube grid */
-.hero .art .compat-title{position:absolute; top:-1.25rem; right:0; font-weight:700; color:#c4b5fd; letter-spacing:.3px; font-size:.95rem}
+/* Title above the cube grid – match left headline (big, bold, white) */
+.hero .art .compat-title{position:absolute; top:-1.5rem; right:0; font-weight:800; color:#fff; letter-spacing:.2px; font-size:clamp(1.15rem, 2vw, 1.75rem); text-shadow:0 2px 16px rgba(0,0,0,.35)}
 /* Animated multi-color aura glows behind the cubes */
 .hero .art .iso-container::before,.hero .art .iso-container::after{content:""; position:absolute; border-radius:50%; pointer-events:none; z-index:0; mix-blend-mode:screen}
 .hero .art .iso-container::before{width:80%; height:80%; top:2%; left:48%; transform:translate(-50%,0); background:radial-gradient(circle at 50% 50%, rgba(124,58,237,.55), transparent 60%); filter:blur(60px); opacity:.75; animation:glowOne 8s ease-in-out infinite alternate}
@@ -86,21 +86,24 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 .hero .art .cube:nth-child(2){translate:-56px -56px; z-index:1}
 .hero .art .cube:nth-child(3){translate:56px 56px; z-index:3}
 .hero .art .cube div{position:absolute; display:flex; flex-direction:column; gap:22px; translate:calc(-62px * var(--x)) calc(-52px * var(--y))}
-.hero .art .cube div span{position:relative; display:inline-block; width:52px; height:52px; z-index:calc(1 * var(--i)); transition:1.2s; background:
+.hero .art .cube div span{position:relative; display:inline-block; width:52px; height:52px; z-index:calc(1 * var(--i)); transition:filter .3s ease, box-shadow .3s ease, transform .3s ease; background:
   linear-gradient(180deg, rgba(0,0,0,.10), rgba(0,0,0,.22)),
   linear-gradient(135deg, rgba(124,58,237,.85), rgba(88,28,135,.75) 55%, rgba(37,99,235,.65)),
   var(--cube-img, url('/profile.png'));
   background-size:cover, cover, cover; background-position:center; background-repeat:no-repeat; background-blend-mode:normal, multiply, normal; filter:drop-shadow(0 0 0 rgba(0,0,0,0)) saturate(1.15) contrast(1.05);}
-.hero .art .cube div span:hover{transition:0s; filter:
-  drop-shadow(0 0 10px rgba(124,58,237,.45))
-  drop-shadow(0 0 22px rgba(88,28,135,.35))
-  drop-shadow(0 0 36px rgba(37,99,235,.32));}
-.hero .art .cube div span::before{content:""; position:absolute; left:-38px; width:38px; height:100%; transform-origin:right; transform:skewY(45deg); transition:1.2s; background:
+.hero .art .cube div span:hover{filter:
+  drop-shadow(0 0 14px rgba(124,58,237,.55))
+  drop-shadow(0 0 30px rgba(88,28,135,.45))
+  drop-shadow(0 0 48px rgba(37,99,235,.42));
+  box-shadow:0 0 22px rgba(124,58,237,.35), 0 0 42px rgba(59,130,246,.28);
+  z-index:400;
+}
+.hero .art .cube div span::before{content:""; position:absolute; left:-38px; width:38px; height:100%; transform-origin:right; transform:skewY(45deg); transition:filter .3s ease; background:
   linear-gradient(180deg, rgba(0,0,0,.38), rgba(0,0,0,.62)),
   linear-gradient(135deg, rgba(124,58,237,.9), rgba(76,29,149,.8) 55%, rgba(29,78,216,.7)),
   var(--cube-img, url('/profile.png'));
   background-size:cover, cover, cover; background-position:center; background-repeat:no-repeat; background-blend-mode:normal, multiply, normal}
-.hero .art .cube div span::after{content:""; position:absolute; top:-38px; left:0; width:100%; height:38px; transform-origin:bottom; transform:skewX(45deg); transition:1.2s; background:
+.hero .art .cube div span::after{content:""; position:absolute; top:-38px; left:0; width:100%; height:38px; transform-origin:bottom; transform:skewX(45deg); transition:filter .3s ease; background:
   linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.04)),
   linear-gradient(135deg, rgba(139,92,246,.65), rgba(59,7,100,.6) 55%, rgba(29,78,216,.5)),
   var(--cube-img, url('/profile.png'));
@@ -108,7 +111,7 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* Tooltip reveal on hover */
 .hero .art .cube div span .tip{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) translateY(8px); opacity:0; transition:all .25s ease; background:rgba(16,12,28,.85); border:1px solid rgba(139,92,246,.45); color:#e5e7eb; padding:.25rem .5rem; border-radius:.5rem; font-size:.75rem; white-space:nowrap; pointer-events:none}
 .hero .art .cube div span:hover .tip{opacity:1; transform:translate(-50%,-50%) translateY(0)}
-.hero .art .cube div span:hover::before,.hero .art .cube div span:hover::after{transition:0s; filter:brightness(1.05)}
+.hero .art .cube div span:hover::before,.hero .art .cube div span:hover::after{filter:brightness(1.1)}
 
 /* Responsiveness: scale cube assembly on smaller screens to stay within art bounds */
 @media(max-width: 480px){

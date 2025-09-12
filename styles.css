@@ -44,7 +44,7 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* Subtle hint text for extension easter egg */
 .hint-extension{color:#9aa4b2; font-size:.9rem; opacity:.9}
 /* Art blobs */
-.hero .art{position:relative; height:360px; border-radius:1rem; overflow:visible; border:none; box-shadow:none; background:transparent; margin-bottom:-48px}
+.hero .art{position:relative; height:360px; border-radius:1rem; overflow:visible; border:none; box-shadow:none; background:transparent; margin-bottom:-60px}
 .blob{position:absolute; filter:blur(50px); opacity:.75}
 .b1{width:380px; height:380px; left:-40px; top:-40px; background:radial-gradient(circle at 30% 30%, rgba(124,58,237,.45), transparent 60%)}
 .b2{width:420px; height:420px; right:-30px; top:40px; background:radial-gradient(circle at 60% 40%, rgba(236,72,153,.38), transparent 60%)}
@@ -57,15 +57,13 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* Subtle lift on hover for modern feel */
 .hero .art img{transition:transform .6s cubic-bezier(.2,.8,.2,1)}
 .hero .art:hover img{transform:scale(1.02)}
-/* Hover note overlay on hero art */
-.hero .art .art-hint{position:absolute; left:1rem; bottom:1rem; padding:.45rem .7rem; border-radius:999px; font-size:.9rem; color:#e5e7eb; background:rgba(20,16,35,.75); border:1px solid rgba(139,92,246,.45); box-shadow:0 6px 18px rgba(0,0,0,.35); opacity:0; transform:translateY(6px); transition:opacity .25s ease, transform .25s ease}
-.hero .art:hover .art-hint{opacity:1; transform:translateY(0)}
+/* Removed art-hint overlay */
 
 /* --- Isometric cube effect inside hero art --- */
-.hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(16px); pointer-events:auto}
+.hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(4px); pointer-events:auto}
 .hero .art .iso-container{animation:none}
-/* Title above the cube grid – match left headline (big, bold, white) */
-.hero .art .compat-title{position:absolute; top:-1.5rem; right:0; font-weight:800; color:#fff; letter-spacing:.2px; font-size:clamp(1.15rem, 2vw, 1.75rem); text-shadow:0 2px 16px rgba(0,0,0,.35)}
+/* Title above the cube grid – exactly mirror headline styles */
+.hero .art .compat-title{position:absolute; top:-1.6rem; right:0; font-weight:800; color:#fff; letter-spacing:.2px; font-size:clamp(2rem,4vw,3.25rem); line-height:1.1; text-shadow:0 2px 16px rgba(0,0,0,.35)}
 /* Animated multi-color aura glows behind the cubes */
 .hero .art .iso-container::before,.hero .art .iso-container::after{content:""; position:absolute; border-radius:50%; pointer-events:none; z-index:0; mix-blend-mode:screen}
 .hero .art .iso-container::before{width:80%; height:80%; top:2%; left:48%; transform:translate(-50%,0); background:radial-gradient(circle at 50% 50%, rgba(124,58,237,.55), transparent 60%); filter:blur(60px); opacity:.75; animation:glowOne 8s ease-in-out infinite alternate}

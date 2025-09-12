@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const link = document.querySelector(`nav a[data-nav='${active}']`);
     if (link) {
       link.setAttribute('aria-current', 'page');
-      link.classList.add('text-white');
+      link.classList.add('active');
     }
   }
 });

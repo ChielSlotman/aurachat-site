@@ -71,17 +71,7 @@
   <script src="/partials/include.js" defer></script>
 </head>
 <body>
-  <header class="nav">
-    <div class="container nav-inner">
-      <a href="/" class="logo"><img src="/logo/icon_only.png" width="28" height="28" alt="AuraSync"><span>AuraSync</span></a>
-      <nav class="links">
-        <a href="/pricing/">Pricing</a>
-        <a href="/faq/">FAQ</a>
-        <a href="/support/">Support</a>
-        <a href="/pricing/" class="btn btn-primary" style="padding:.5rem .9rem;">Get Premium</a>
-      </nav>
-    </div>
-  </header>
+  <div data-include="/partials/header.html"></div>
   <main>
     <section class="hero">
       <div class="container">
@@ -95,10 +85,8 @@
             </div>
           </div>
           <div>
-            <div class="art">
-              <div class="blob b1"></div>
-              <div class="blob b2"></div>
-              <div class="blob b3"></div>
+            <div class="art" aria-hidden="true">
+              <img src="/banner.png" alt="AuraSync preview" />
             </div>
           </div>
         </div>
@@ -123,19 +111,7 @@
       </div>
     </section>
   </main>
-  <footer>
-    <div class="container inner">
-      <div>© <span id="y"></span> AuraSync</div>
-      <div class="links">
-        <a href="/legal/">Legal</a>
-        <span aria-hidden="true">·</span>
-        <a href="/support/">Support</a>
-      </div>
-    </div>
-  </footer>
-  <script>
-    document.getElementById('y').textContent = new Date().getFullYear();
-  </script>
+  <div data-include="/partials/footer.html"></div>
   <script src="/config.js" defer></script>
 </body>
 </html>

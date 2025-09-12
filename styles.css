@@ -1,4 +1,4 @@
-/* Light theme for AuraSync landing */
+/* Light theme for AuraSync — canonical site styles */
 *{box-sizing:border-box}
 :root{
   --primary:#7c3aed; /* violet */
@@ -13,6 +13,9 @@ body{margin:0; background:var(--bg); color:var(--text); font-family:Inter,ui-san
 header.nav{position:sticky; top:0; z-index:40; backdrop-filter:saturate(180%) blur(14px); background:rgba(255,255,255,.7); border-bottom:1px solid rgba(226,232,240,.8)}
 header.nav .nav-inner{display:flex; align-items:center; justify-content:space-between; padding:.75rem 1rem}
 header.nav .links a{color:var(--text); text-decoration:none; font-weight:600}
+header.nav .links a.active{color:#111827}
+header.nav .logo{display:flex; align-items:center; gap:.5rem}
+header.nav .logo span{font-weight:800}
 /* Buttons */
 .btn{display:inline-flex; align-items:center; justify-content:center; padding:.8rem 1.1rem; border-radius:.75rem; font-weight:700; text-decoration:none; border:1px solid rgba(15,23,42,.1)}
 .btn-primary{background:linear-gradient(90deg,var(--primary),var(--primary-2)); color:#fff; border-color:transparent; box-shadow:0 4px 16px rgba(124,58,237,.2)}
@@ -26,12 +29,14 @@ header.nav .links a{color:var(--text); text-decoration:none; font-weight:600}
 .sub{color:var(--muted); margin-top:1rem; max-width:46ch}
 .cta{display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.25rem}
 /* Art blobs */
-.art{position:relative; height:360px; border-radius:1rem}
+.art{position:relative; height:360px; border-radius:1rem; overflow:hidden}
 .blob{position:absolute; filter:blur(50px); opacity:.75}
 .b1{width:380px; height:380px; left:-40px; top:-40px; background:radial-gradient(circle at 30% 30%, rgba(124,58,237,.55), transparent 60%)}
 .b2{width:420px; height:420px; right:-30px; top:40px; background:radial-gradient(circle at 60% 40%, rgba(236,72,153,.55), transparent 60%)}
 .b3{width:360px; height:360px; right:80px; bottom:-60px; background:radial-gradient(circle at 40% 60%, rgba(34,211,238,.55), transparent 60%)}
 .art::after{content:''; position:absolute; inset:0; border-radius:1rem; background:linear-gradient(180deg, rgba(255,255,255,.7), rgba(255,255,255,.3)); border:1px solid var(--border); box-shadow:0 10px 35px rgba(15,23,42,.08) inset}
+/* Optional hero image when provided */
+.art img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; border-radius:1rem}
 /* Features */
 .features{padding:3rem 0}
 .feat-grid{display:grid; grid-template-columns:1fr; gap:1rem}
@@ -43,3 +48,12 @@ header.nav .links a{color:var(--text); text-decoration:none; font-weight:600}
 footer{border-top:1px solid var(--border); color:#64748b}
 footer .inner{display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:1.25rem 0; flex-wrap:wrap}
 footer a{color:inherit; text-decoration:none}
+
+/* --- Lightweight overrides so pages that used dark utilities still look good on light theme --- */
+.bg-black,.bg-black\/60,.bg-black\/70,.bg-black\/80{background:transparent}
+.text-slate-100,.text-slate-300,.text-slate-400{color:var(--muted)}
+.prose-invert{color:var(--text)}
+.prose-invert h2{color:var(--text)}
+.card.bg-white\/5,.bg-white\/5{background:#fff}
+.border-white\/10{border-color:var(--border)}
+.rounded, .rounded-lg{border-radius:.75rem}

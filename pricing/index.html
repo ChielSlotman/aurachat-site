@@ -13,12 +13,12 @@
   <meta property="og:url" content="https://aurasync.info/pricing/">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/styles.css">
   <script async src="https://js.stripe.com/v3/pricing-table.js"></script>
   <script src="/partials/include.js" defer></script>
 </head>
-<body class="text-slate-300 bg-black">
+<body>
   <div data-include="/partials/header.html"></div>
   <main>
     <section class="hero-gradient">
@@ -85,22 +85,4 @@
   });
   </script>
 </body>
-</html>
-// Manage billing: expects customer_id known in your app context
-document.getElementById('manage-billing')?.addEventListener('click', async () => {
-  const customer_id = window.localStorage.getItem('stripe_customer_id') || '';
-  if (!customer_id) {
-    alert('Customer not found. Use the email link in your receipt to manage billing.');
-    return;
-  }
-  try {
-    const res = await fetch('https://api.aurasync.info/billing-portal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ customer_id }) });
-    const data = await res.json();
-    if (data?.url) { window.location.href = data.url; }
-    else { alert('Portal unavailable'); }
-  } catch {
-    alert('Portal unavailable');
-  }
-});
-</script>
 </html>

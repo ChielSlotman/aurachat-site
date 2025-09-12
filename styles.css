@@ -66,6 +66,20 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* Hover note overlay on hero art */
 .hero .art .art-hint{position:absolute; left:1rem; bottom:1rem; padding:.45rem .7rem; border-radius:999px; font-size:.9rem; color:#e5e7eb; background:rgba(20,16,35,.75); border:1px solid rgba(139,92,246,.45); box-shadow:0 6px 18px rgba(0,0,0,.35); opacity:0; transform:translateY(6px); transition:opacity .25s ease, transform .25s ease}
 .hero .art:hover .art-hint{opacity:1; transform:translateY(0)}
+
+/* --- Isometric cube effect inside hero art --- */
+.hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px}
+.hero .art .iso-container{animation: artHue 8s linear infinite}
+@keyframes artHue{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}
+.hero .art .cube{position:relative; transform:skewY(-18deg);}
+.hero .art .cube:nth-child(2){translate:-56px -56px; z-index:1}
+.hero .art .cube:nth-child(3){translate:56px 56px; z-index:3}
+.hero .art .cube div{position:absolute; display:flex; flex-direction:column; gap:22px; translate:calc(-62px * var(--x)) calc(-52px * var(--y))}
+.hero .art .cube div span{position:relative; display:inline-block; width:52px; height:52px; background:#dcdcdc; z-index:calc(1 * var(--i)); transition:1.2s}
+.hero .art .cube div span:hover{transition:0s; background:#8b5cf6; filter:drop-shadow(0 0 22px #8b5cf6)}
+.hero .art .cube div span::before{content:""; position:absolute; left:-38px; width:38px; height:100%; background:#bbb; transform-origin:right; transform:skewY(45deg); transition:1.2s}
+.hero .art .cube div span::after{content:""; position:absolute; top:-38px; left:0; width:100%; height:38px; background:#e6e6e6; transform-origin:bottom; transform:skewX(45deg); transition:1.2s}
+.hero .art .cube div span:hover::before,.hero .art .cube div span:hover::after{transition:0s; background:#8b5cf6}
 /* Features */
 .features{padding:3rem 0}
 .feat-grid{display:grid; grid-template-columns:1fr; gap:1rem}

@@ -41,6 +41,7 @@
           </div>
           <div>
             <div class="art" aria-hidden="true">
+              <div class="compat-title" aria-label="Compatible websites">Compatible with AuraSync</div>
               <div class="iso-container">
                 <div class="iso-mask">
                   <!-- Expanded cube stacks to better fill the mask silhouette -->
@@ -153,6 +154,45 @@
     </section>
   </main>
   <div data-include="/partials/footer.html"></div>
+  <script>
+    // Assign each cube a unique logo from the "Website Cubes" folder and add a tooltip label
+    (function(){
+      const spans = document.querySelectorAll('.iso-container .cube div span');
+      if(!spans.length) return;
+      const logos = [
+        'anima.ai.png','artbot.ai.png','aurasync.info.png','chai.ml.png','character.ai.png','crushon.ai.png','dialogflow.cloud.google.com.png','doppel.ai.png','janitorai.com.png','joyland.ai.png','kuki.ai.png','livechat.ai.png','novelai.net.png','personalityforge.com.png','play.aidungeon.com.png','rasa.com.png','roleplai.app.png','sakura.ai.png','storymate.ai.png','talkie.ai.png','venus.ai.png','yodayo.com.png'
+      ];
+      const base = '/Website%20Cubes/';
+      const pretty = (s)=> s
+        .replace(/\.png$/,'')
+        .replace(/https?:\/\//,'')
+        .replace(/www\./,'')
+        .replace(/([.-])/g,' ')
+        .replace(/\s+/g,' ')
+        .replace(/\b\w/g, m=> m.toUpperCase())
+        .trim();
+
+      spans.forEach((el, i)=>{
+        const file = logos[i % logos.length];
+        const url = `${base}${file}`;
+        const label = pretty(file);
+        // Preload to avoid flash/missing image
+        const img = new Image();
+        img.onload = () => {
+          el.style.setProperty('--cube-img', `url("${url}")`);
+          el.dataset.label = label;
+          if(!el.querySelector('.tip')){
+            const tip = document.createElement('em');
+            tip.className = 'tip';
+            tip.textContent = label;
+            tip.setAttribute('role','note');
+            el.appendChild(tip);
+          }
+        };
+        img.src = url;
+      });
+    })();
+  </script>
   <script src="/config.js" defer></script>
 </body>
 </html>

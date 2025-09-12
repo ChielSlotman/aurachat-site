@@ -62,8 +62,10 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 .hero .art:hover .art-hint{opacity:1; transform:translateY(0)}
 
 /* --- Isometric cube effect inside hero art --- */
-.hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(36px); pointer-events:none}
+.hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(36px); pointer-events:auto}
 .hero .art .iso-container{animation:none}
+/* Title above the cube grid */
+.hero .art .compat-title{position:absolute; top:-1.25rem; right:0; font-weight:700; color:#c4b5fd; letter-spacing:.3px; font-size:.95rem}
 /* Animated multi-color aura glows behind the cubes */
 .hero .art .iso-container::before,.hero .art .iso-container::after{content:""; position:absolute; border-radius:50%; pointer-events:none; z-index:0; mix-blend-mode:screen}
 .hero .art .iso-container::before{width:80%; height:80%; top:2%; left:48%; transform:translate(-50%,0); background:radial-gradient(circle at 50% 50%, rgba(124,58,237,.55), transparent 60%); filter:blur(60px); opacity:.75; animation:glowOne 8s ease-in-out infinite alternate}
@@ -103,6 +105,9 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
   linear-gradient(135deg, rgba(139,92,246,.65), rgba(59,7,100,.6) 55%, rgba(29,78,216,.5)),
   var(--cube-img, url('/profile.png'));
   background-size:cover, cover, cover; background-position:center; background-repeat:no-repeat; background-blend-mode:normal, multiply, normal}
+/* Tooltip reveal on hover */
+.hero .art .cube div span .tip{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) translateY(8px); opacity:0; transition:all .25s ease; background:rgba(16,12,28,.85); border:1px solid rgba(139,92,246,.45); color:#e5e7eb; padding:.25rem .5rem; border-radius:.5rem; font-size:.75rem; white-space:nowrap; pointer-events:none}
+.hero .art .cube div span:hover .tip{opacity:1; transform:translate(-50%,-50%) translateY(0)}
 .hero .art .cube div span:hover::before,.hero .art .cube div span:hover::after{transition:0s; filter:brightness(1.05)}
 
 /* Responsiveness: scale cube assembly on smaller screens to stay within art bounds */

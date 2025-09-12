@@ -23,13 +23,15 @@ header.nav .links{display:flex; align-items:center; gap:1.25rem}
 header.nav .links .btn{margin-left:.5rem}
 header.nav .logo{display:flex; align-items:center; gap:.5rem}
 header.nav .logo span{font-weight:800}
+/* White brand text when not using gradient */
+header.nav .logo .brand{color:#fff; font-weight:800; font-size:1.15rem; letter-spacing:.2px}
 /* Gradient brand text reusable utility */
 .brand-grad{background:linear-gradient(90deg,var(--primary),var(--primary-2),var(--primary-3)); -webkit-background-clip:text; background-clip:text; color:transparent}
 /* Stronger header brand appearance */
 header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:.2px; text-shadow:0 0 10px rgba(124,58,237,.25)}
 /* Buttons */
 .btn{display:inline-flex; align-items:center; justify-content:center; padding:.8rem 1.1rem; border-radius:.75rem; font-weight:700; text-decoration:none; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:#fff}
-.btn-primary{background:linear-gradient(90deg,var(--primary),var(--primary-2)); color:#fff; border-color:transparent; box-shadow:0 8px 24px rgba(124,58,237,.28)}
+.btn-primary{background:linear-gradient(90deg,var(--primary),var(--primary-2)); color:#fff; border:none; background-clip:padding-box; box-shadow:0 8px 24px rgba(124,58,237,.28)}
 .btn-ghost{background:transparent; color:#fff}
 /* Hero */
 .hero{position:relative; overflow:hidden}

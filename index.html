@@ -191,6 +191,30 @@
         };
         img.src = url;
       });
+
+      // After initial assignment, swap the first Character Ai and Livechat Ai cubes
+      const trySwap = () => {
+        const items = Array.from(document.querySelectorAll('.iso-container .cube div span'));
+        const findBy = (name) => items.find(el => (el.dataset.label||'').toLowerCase() === name);
+        const a = findBy('character ai');
+        const b = findBy('livechat ai');
+        if(a && b){
+          const aUrl = a.style.getPropertyValue('--cube-img');
+          const bUrl = b.style.getPropertyValue('--cube-img');
+          // swap images
+          a.style.setProperty('--cube-img', bUrl);
+          b.style.setProperty('--cube-img', aUrl);
+          // swap labels and tooltip text
+          a.dataset.label = 'Livechat Ai';
+          b.dataset.label = 'Character Ai';
+          const at = a.querySelector('.tip'); if(at) at.textContent = 'Livechat Ai';
+          const bt = b.querySelector('.tip'); if(bt) bt.textContent = 'Character Ai';
+          return true;
+        }
+        return false;
+      };
+      // Give a short delay so preloaders can set labels/tooltips
+      setTimeout(() => { if(!trySwap()){ setTimeout(trySwap, 300); } }, 300);
     })();
   </script>
   <script src="/config.js" defer></script>

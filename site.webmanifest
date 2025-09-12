@@ -1,0 +1,19 @@
+{
+  "name": "AuraSync",
+  "short_name": "AuraSync",
+  "icons": [
+    {
+      "src": "/logo/icon_only.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/logo/icon_only.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#0b0c12",
+  "background_color": "#0b0c12",
+  "display": "standalone"
+}

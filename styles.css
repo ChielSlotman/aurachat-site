@@ -71,9 +71,9 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 @keyframes glowTwo{0%{transform:translate(0, 0) scale(1);}100%{transform:translate(6%, -4%) scale(1.07);}}
 @keyframes glowThree{0%{transform:translate(0,0) scale(1)}100%{transform:translate(2%, -4%) scale(1.06)}}
 @keyframes floatCube{
-  0%{ transform:translateY(-4px) }
+  0%{ transform:translateY(-12px) }
   50%{ transform:translateY(0) }
-  100%{ transform:translateY(-4px) }
+  100%{ transform:translateY(-12px) }
 }
 .hero .art .iso-container .iso-mask{position:relative; width:min(92%, 440px); height:min(92%, 320px); display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 18px 40px rgba(124,58,237,.25)); --cube-img:url('/profile.png'); isolation:isolate}
 /* Remove previous logo mask to avoid visible boxed cropping; let cubes render freely */

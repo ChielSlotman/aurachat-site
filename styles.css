@@ -137,10 +137,10 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 .card h3{margin:.25rem 0 .25rem; font-size:1.1rem}
 .card p{color:var(--muted); margin:.25rem 0 0}
 /* Influencers */
-.influencers{padding:1rem 0 3rem}
-.leaderboard{display:grid; grid-template-columns:1fr; gap:1rem; margin-top:1rem}
-@media(min-width:900px){.leaderboard{grid-template-columns:repeat(3,1fr)}}
-.lb-card{display:flex; align-items:center; gap:.9rem; background:var(--card); border:1px solid var(--border); border-radius:1rem; padding:.9rem 1rem; box-shadow:0 10px 30px rgba(0,0,0,.3); position:relative}
+.page-hero{padding:2.5rem 0 1rem}
+.influencers{padding:1rem 0 3.5rem}
+.leaderboard{display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:1rem; margin-top:1rem}
+.lb-card{display:flex; align-items:center; gap:.9rem; background:var(--card); border:1px solid var(--border); border-radius:1rem; padding:1rem 1.1rem; box-shadow:0 10px 30px rgba(0,0,0,.3); position:relative}
 .lb-card .rank{position:absolute; top:.6rem; left:.7rem; background:rgba(124,58,237,.18); border:1px solid rgba(124,58,237,.35); color:#c4b5fd; font-weight:800; font-size:.8rem; padding:.1rem .4rem; border-radius:.5rem}
 .lb-card .avatar{border-radius:.75rem; border:1px solid var(--border)}
 .lb-card .meta{flex:1}

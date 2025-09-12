@@ -41,6 +41,8 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 .headline .brand{background:linear-gradient(90deg,var(--primary),var(--primary-2),var(--primary-3)); -webkit-background-clip:text; background-clip:text; color:transparent}
 .sub{color:var(--muted); margin-top:1rem; max-width:46ch}
 .cta{display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.25rem}
+/* Subtle hint text for extension easter egg */
+.hint-extension{color:#9aa4b2; font-size:.9rem; opacity:.9}
 /* Art blobs */
 .hero .art{position:relative; height:360px; border-radius:1rem; overflow:hidden; border:1px solid var(--border); box-shadow:0 25px 60px rgba(0,0,0,.45), 0 10px 24px rgba(124,58,237,.15)}
 .blob{position:absolute; filter:blur(50px); opacity:.75}

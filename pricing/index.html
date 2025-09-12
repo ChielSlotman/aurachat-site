@@ -32,10 +32,6 @@
                 publishable-key="pk_test_51S3cea1XlsSTEaa9zu10zIjcwOsdfEN5PYP7EA9AKwFuoIACbPUSfJCIJhAgvRoTnGqP0mRlOYSlqveFHQuXhG6I00gFu6TNbX">
               </stripe-pricing-table>
             </div>
-            <div class="card p-6 mt-6">
-              <h3 class="text-xl text-slate-100 font-medium mb-3">Manage billing</h3>
-              <button id="manage-billing" class="btn-secondary inline-flex items-center justify-center px-4 py-2 rounded-lg">Open customer portal</button>
-            </div>
           </div>
           <aside>
             <div class="card p-6">
@@ -73,16 +69,6 @@
   </main>
   <div data-include="/partials/footer.html"></div>
 
-  <script>
-  document.getElementById('manage-billing')?.addEventListener('click', async () => {
-    const customer_id = window.localStorage.getItem('stripe_customer_id') || '';
-    if (!customer_id) { alert('Customer not found. Use your Stripe receipt to manage billing.'); return; }
-    try {
-      const res = await fetch('https://api.aurasync.info/billing-portal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ customer_id }) });
-      const data = await res.json();
-      if (data?.url) { window.location.href = data.url; } else { alert('Portal unavailable'); }
-    } catch { alert('Portal unavailable'); }
-  });
-  </script>
+  
 </body>
 </html>

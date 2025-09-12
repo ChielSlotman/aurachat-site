@@ -70,6 +70,17 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* --- Isometric cube effect inside hero art --- */
 .hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px}
 .hero .art .iso-container{animation: artHue 8s linear infinite}
+.hero .art .iso-container .iso-mask{position:relative; width:min(92%, 440px); height:min(92%, 320px); display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 18px 40px rgba(124,58,237,.25));}
+/* Use the site icon as a luminance mask so the cubes only show inside the logo silhouette */
+.hero .art .iso-container .iso-mask{
+  -webkit-mask-image: url('/logo/icon_only.png');
+  mask-image: url('/logo/icon_only.png');
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+}
+/* Brand tint overlay so the cubes inherit aura colors subtly */
+.hero .art .iso-container .iso-mask::before{content:""; position:absolute; inset:0; background:radial-gradient(80% 80% at 30% 30%, rgba(124,58,237,.35), transparent 60%), radial-gradient(70% 70% at 70% 60%, rgba(236,72,153,.25), transparent 60%), radial-gradient(60% 60% at 50% 90%, rgba(34,211,238,.22), transparent 60%); pointer-events:none}
 @keyframes artHue{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}
 .hero .art .cube{position:relative; transform:skewY(-18deg);}
 .hero .art .cube:nth-child(2){translate:-56px -56px; z-index:1}
@@ -80,6 +91,21 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 .hero .art .cube div span::before{content:""; position:absolute; left:-38px; width:38px; height:100%; background:#bbb; transform-origin:right; transform:skewY(45deg); transition:1.2s}
 .hero .art .cube div span::after{content:""; position:absolute; top:-38px; left:0; width:100%; height:38px; background:#e6e6e6; transform-origin:bottom; transform:skewX(45deg); transition:1.2s}
 .hero .art .cube div span:hover::before,.hero .art .cube div span:hover::after{transition:0s; background:#8b5cf6}
+
+/* Responsiveness: scale cube assembly on smaller screens to stay within art bounds */
+@media(max-width: 480px){
+  .hero .art{height:300px}
+  .hero .art .iso-container .iso-mask{width:90%; height:82%}
+  .hero .art .cube div{gap:18px; translate:calc(-52px * var(--x)) calc(-44px * var(--y))}
+  .hero .art .cube div span{width:44px; height:44px}
+  .hero .art .cube div span::before{left:-32px; width:32px}
+  .hero .art .cube div span::after{top:-32px; height:32px}
+}
+
+/* Reduced motion respect */
+@media (prefers-reduced-motion: reduce){
+  .hero .art .iso-container{animation:none}
+}
 /* Features */
 .features{padding:3rem 0}
 .feat-grid{display:grid; grid-template-columns:1fr; gap:1rem}

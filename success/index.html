@@ -53,6 +53,23 @@ function getParam(name){try{const u=new URL(window.location.href);return u.searc
 function el(id){return document.getElementById(id)}
 function showSpinner(on){el('spinner').classList.toggle('hidden',!on)}
 function setLead(txt){el('lead').textContent=txt}
+// Progressive status helper to reassure users while waiting
+const PROGRESS_SCHEDULE = [
+  { t: 0, msg: 'Checking your payment…' },
+  { t: 5000, msg: 'Still working… this can take 10–30 seconds.' },
+  { t: 15000, msg: 'Servers can be busy. Please keep this tab open.' },
+  { t: 30000, msg: 'Almost there. It can take up to 1–2 minutes at peak times.' },
+  { t: 60000, msg: 'Thanks for waiting. Most activations finish within 2 minutes.' },
+  { t: 120000, msg: 'If this takes more than 3–5 minutes, refresh or contact support.' }
+];
+let progressTimers = [];
+function startProgress(){
+  clearProgress();
+  progressTimers = PROGRESS_SCHEDULE.map(({t,msg})=>setTimeout(()=>setLead(msg), t));
+}
+function clearProgress(){
+  progressTimers.forEach(clearTimeout); progressTimers=[];
+}
 async function activate(){
   const sid=getParam('session_id');
   if(!sid){
@@ -61,7 +78,7 @@ async function activate(){
     return;
   }
   showSpinner(true);
-  setLead('Checking your payment…');
+  startProgress();
   try{
     const res=await fetch('https://api.aurasync.info/activate',{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sid})});
     const data=await res.json().catch(()=>({}));
@@ -74,9 +91,11 @@ async function activate(){
     el('error').classList.add('hidden');
     el('code').value = code;
     el('emailOut').textContent = email;
+    clearProgress();
     setLead('Here is your activation code');
   }catch(e){
-    setLead('');
+    clearProgress();
+    setLead('We could not verify your purchase yet. Please wait a bit and retry.');
     el('success').classList.add('hidden');
     el('error').classList.remove('hidden');
   }finally{

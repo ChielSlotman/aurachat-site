@@ -63,6 +63,9 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* Subtle lift on hover for modern feel */
 .hero .art img{transition:transform .6s cubic-bezier(.2,.8,.2,1)}
 .hero .art:hover img{transform:scale(1.02)}
+/* Hover note overlay on hero art */
+.hero .art .art-hint{position:absolute; left:1rem; bottom:1rem; padding:.45rem .7rem; border-radius:999px; font-size:.9rem; color:#e5e7eb; background:rgba(20,16,35,.75); border:1px solid rgba(139,92,246,.45); box-shadow:0 6px 18px rgba(0,0,0,.35); opacity:0; transform:translateY(6px); transition:opacity .25s ease, transform .25s ease}
+.hero .art:hover .art-hint{opacity:1; transform:translateY(0)}
 /* Features */
 .features{padding:3rem 0}
 .feat-grid{display:grid; grid-template-columns:1fr; gap:1rem}

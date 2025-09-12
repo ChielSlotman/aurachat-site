@@ -1,0 +1,26 @@
+AuraSync - Privacy Policy
+=========================
+
+AuraSync respects your privacy. This policy explains what we collect and how we use it.
+
+1. Data We Collect
+- Email address: only when you redeem a premium code or contact support.
+- License codes and tokens: stored securely to validate premium access.
+- Extension settings (avatars, effects, preferences): stored locally in your browser.
+
+2. What We Do Not Collect
+- We do not track your browsing activity.
+- We do not sell or share your data with advertisers.
+- We do not use cookies (see Cookie Policy).
+
+3. Third-Party Services
+- Payments are processed securely by Stripe. Stripe may collect data necessary to complete transactions.
+
+4. Your Rights
+- You may request access to or deletion of your stored data by contacting us at support@aurasync.info.
+
+5. Security
+- We use encrypted storage and secure APIs to protect license tokens and account data.
+
+6. Contact
+- Questions? Email support@aurasync.info

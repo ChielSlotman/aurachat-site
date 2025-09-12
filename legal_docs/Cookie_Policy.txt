@@ -1,0 +1,14 @@
+AuraSync - Cookie Policy
+========================
+
+AuraSync does not use cookies.
+
+1. Extension
+- The AuraSync browser extension stores settings locally in your browser. No cookies are used.
+
+2. Website
+- The AuraSync website does not use cookies or trackers.
+- Stripe checkout may set temporary cookies when processing payments.
+
+3. Contact
+- For questions, email support@aurasync.info

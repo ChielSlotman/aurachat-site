@@ -1,0 +1,32 @@
+AuraSync - Terms of Service
+===========================
+
+Welcome to AuraSync. These Terms of Service explain the rules for using our browser extension and website.
+
+1. Using AuraSync
+- AuraSync provides a browser extension that enhances chat experiences with floating avatars, reactions, and related features.
+- You must be at least 13 years old to use AuraSync.
+- Do not misuse AuraSync: no reverse engineering, no unauthorized reselling, and no attempts to disrupt service.
+
+2. Accounts and Subscriptions
+- Some features are free. Premium features require a valid subscription or license code.
+- Subscriptions are managed through our payment provider (Stripe).
+- You agree to provide accurate information when subscribing.
+
+3. Refunds
+- Refunds are handled on a case-by-case basis. See our Refund Policy for details.
+
+4. Third-Party Platforms
+- AuraSync integrates with third-party AI websites (e.g., Character.AI, JanitorAI, etc.).
+- AuraSync is not responsible for any content, behavior, or policies of those platforms.
+- Your interactions remain subject to the terms of each third-party platform.
+
+5. Liability
+- AuraSync is provided "as is." We do not guarantee uninterrupted service.
+- AuraSync is not liable for damages arising from your use of the extension.
+
+6. Termination
+- We may suspend or terminate access if you violate these terms or misuse the extension.
+
+7. Contact
+- For questions about these terms, email: support@aurasync.info

@@ -62,8 +62,7 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 /* --- Isometric cube effect inside hero art --- */
 .hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(-4px); pointer-events:auto; animation:floatCube 10s ease-in-out infinite}
 .hero .art .iso-container{animation:none}
-/* Title above the cube grid – match style but smaller and with spacing */
-.hero .art .compat-title{position:absolute; top:-1.6rem; right:0; font-weight:800; color:#fff; letter-spacing:.2px; font-size:clamp(1.15rem,2vw,1.6rem); line-height:1.15; text-shadow:0 2px 16px rgba(0,0,0,.35)}
+/* Removed caption above cubes */
 /* Animated multi-color aura glows behind the cubes */
 .hero .art .iso-container::before,.hero .art .iso-container::after{content:""; position:absolute; border-radius:50%; pointer-events:none; z-index:0; mix-blend-mode:screen}
 .hero .art .iso-container::before{width:80%; height:80%; top:2%; left:48%; transform:translate(-50%,0); background:radial-gradient(circle at 50% 50%, rgba(124,58,237,.55), transparent 60%); filter:blur(60px); opacity:.75; animation:glowOne 8s ease-in-out infinite alternate}
@@ -128,7 +127,7 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 
 /* Reduced motion respect */
 @media (prefers-reduced-motion: reduce){
-  .hero .art .iso-container{animation:none}
+  /* Keep float animation enabled */
 }
 /* Features */
 .features{padding:3rem 0}

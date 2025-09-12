@@ -42,7 +42,6 @@
           </div>
           <div>
             <div class="art" aria-hidden="true">
-              <div class="compat-title" aria-label="Compatible websites">Compatible with AuraSync</div>
               <div class="iso-container">
                 <div class="iso-mask">
                   <!-- Expanded cube stacks to better fill the mask silhouette -->
@@ -160,7 +159,12 @@
       const spans = document.querySelectorAll('.iso-container .cube div span');
       if(!spans.length) return;
       const logos = [
-        'anima.ai.png','artbot.ai.png','aurasync.info.png','chai.ml.png','character.ai.png','crushon.ai.png','dialogflow.cloud.google.com.png','doppel.ai.png','janitorai.com.png','joyland.ai.png','kuki.ai.png','livechat.ai.png','novelai.net.png','personalityforge.com.png','play.aidungeon.com.png','rasa.com.png','roleplai.app.png','sakura.ai.png','storymate.ai.png','talkie.ai.png','venus.ai.png','yodayo.com.png'
+        'anima.ai.png','artbot.ai.png','aurasync.info.png','chai.ml.png','crushon.ai.png','dialogflow.cloud.google.com.png','doppel.ai.png','janitorai.com.png','joyland.ai.png','kuki.ai.png','novelai.net.png','personalityforge.com.png','play.aidungeon.com.png','rasa.com.png','roleplai.app.png','sakura.ai.png','storymate.ai.png','talkie.ai.png','venus.ai.png','yodayo.com.png'
+      ];
+      // We'll pin two key logos explicitly to the two most front-right faces
+      const priority = [
+        'character.ai.png',
+        'livechat.ai.png'
       ];
       const base = '/Website%20Cubes/';
       const pretty = (s)=> s
@@ -172,6 +176,7 @@
         .replace(/\b\w/g, m=> m.toUpperCase())
         .trim();
 
+      // Assign base logos in a round-robin
       spans.forEach((el, i)=>{
         const file = logos[i % logos.length];
         const url = `${base}${file}`;
@@ -192,29 +197,40 @@
         img.src = url;
       });
 
-      // After initial assignment, swap the first Character Ai and Livechat Ai cubes
-      const trySwap = () => {
+      // Pin priority logos to the two front-most, right-most faces for visibility
+      const pinPriority = () => {
         const items = Array.from(document.querySelectorAll('.iso-container .cube div span'));
-        const findBy = (name) => items.find(el => (el.dataset.label||'').toLowerCase() === name);
-        const a = findBy('character ai');
-        const b = findBy('livechat ai');
-        if(a && b){
-          const aUrl = a.style.getPropertyValue('--cube-img');
-          const bUrl = b.style.getPropertyValue('--cube-img');
-          // swap images
-          a.style.setProperty('--cube-img', bUrl);
-          b.style.setProperty('--cube-img', aUrl);
-          // swap labels and tooltip text
-          a.dataset.label = 'Livechat Ai';
-          b.dataset.label = 'Character Ai';
-          const at = a.querySelector('.tip'); if(at) at.textContent = 'Livechat Ai';
-          const bt = b.querySelector('.tip'); if(bt) bt.textContent = 'Character Ai';
-          return true;
-        }
-        return false;
+        // Heuristic: pick two spans with the highest inline z-index (var --i) that are on the right-most columns
+        const scored = items.map(el => {
+          const s = getComputedStyle(el);
+          const z = parseInt(s.zIndex||'0', 10) || 0;
+          // x is embedded on the parent div style as --x
+          const col = el.parentElement;
+          const x = parseFloat(getComputedStyle(col).getPropertyValue('--x')||'0');
+          return {el, z, x};
+        });
+        scored.sort((a,b)=> (b.z - a.z) || (b.x - a.x));
+        const targets = scored.slice(0,2).map(o=>o.el);
+        targets.forEach((el, idx) => {
+          const file = priority[idx];
+          if(!file) return;
+          const url = `${base}${file}`;
+          const label = pretty(file);
+          const img = new Image();
+          img.onload = () => {
+            el.style.setProperty('--cube-img', `url("${url}")`);
+            el.dataset.label = label;
+            const tip = el.querySelector('.tip') || document.createElement('em');
+            tip.className = 'tip';
+            tip.textContent = label;
+            tip.setAttribute('role','note');
+            if(!tip.parentElement) el.appendChild(tip);
+          };
+          img.src = url;
+        });
       };
-      // Give a short delay so preloaders can set labels/tooltips
-      setTimeout(() => { if(!trySwap()){ setTimeout(trySwap, 300); } }, 300);
+      // Run after a short delay to ensure base assignments applied
+      setTimeout(pinPriority, 250);
     })();
   </script>
   <script src="/config.js" defer></script>

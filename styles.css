@@ -61,7 +61,6 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 
 /* --- Isometric cube effect inside hero art --- */
 .hero .art .iso-container{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; perspective:800px; transform:translateY(-4px); pointer-events:auto; animation:floatCube 10s ease-in-out infinite}
-.hero .art .iso-container{animation:none}
 /* Removed caption above cubes */
 /* Animated multi-color aura glows behind the cubes */
 .hero .art .iso-container::before,.hero .art .iso-container::after{content:""; position:absolute; border-radius:50%; pointer-events:none; z-index:0; mix-blend-mode:screen}

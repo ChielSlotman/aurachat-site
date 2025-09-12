@@ -34,18 +34,12 @@
             </div>
           </div>
           <div>
-            <form id="contactForm" class="card p-6 max-w-xl mx-auto">
+            <div class="card p-6 max-w-xl mx-auto">
               <h3 class="text-xl text-slate-100 font-medium">Contact</h3>
-              <label class="block mt-3 text-sm">Email
-                <input type="email" id="email" required class="mt-1 w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2" aria-invalid="false">
-              </label>
-              <label class="block mt-3 text-sm">Message
-                <textarea id="message" required class="mt-1 w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 h-32"></textarea>
-              </label>
-              <button class="btn-secondary mt-4 px-4 py-2 rounded-lg" type="submit">Send</button>
-              <div id="note" class="text-sm mt-3"></div>
+              <p class="mt-3 text-sm">Send us an email at <a class="underline" href="mailto:support@aurasync.info">support@aurasync.info</a>.</p>
+              <p class="mt-2 text-sm text-slate-400">Tip: include your order email and any screenshots so we can help you faster.</p>
               <p class="text-xs text-slate-400 mt-3">We respect your privacy. See our <a href="/legal/privacy/" class="underline">Privacy Policy</a>.</p>
-            </form>
+            </div>
           </div>
         </div>
       </div>
@@ -53,26 +47,6 @@
     
   </main>
   <div data-include="/partials/footer.html"></div>
-  <script>
-    const form = document.getElementById('contactForm');
-    const email = document.getElementById('email');
-    const message = document.getElementById('message');
-    const note = document.getElementById('note');
-    form?.addEventListener('submit', async (ev)=>{
-      ev.preventDefault();
-      note.textContent = '';
-      email.setAttribute('aria-invalid','false');
-      message.setAttribute('aria-invalid','false');
-      if(!email.value || !email.value.includes('@')) { email.setAttribute('aria-invalid','true'); note.textContent='Enter a valid email.'; return; }
-      if(!message.value || message.value.length < 5) { message.setAttribute('aria-invalid','true'); note.textContent='Please enter a message.'; return; }
-      try {
-        const res = await fetch('/support/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: email.value, message: message.value }) });
-        if(!res.ok) throw new Error('fail');
-        note.textContent = 'Thanks. We will get back to you.';
-      } catch {
-        note.textContent = 'Failed to send. Email us at support@aurasync.info.';
-      }
-    });
-  </script>
+  <script></script>
 </body>
 </html>

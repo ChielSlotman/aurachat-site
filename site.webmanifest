@@ -3,12 +3,12 @@
   "short_name": "AuraSync",
   "icons": [
     {
-      "src": "/logo/icon_only.png",
+      "src": "/icons transparent/icon_192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/logo/icon_only.png",
+      "src": "/icons transparent/icon_512.png",
       "sizes": "512x512",
       "type": "image/png"
     }

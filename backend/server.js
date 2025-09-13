@@ -177,6 +177,18 @@ if (process.env.DATABASE_URL) {
   console.info('[DB] using in-memory store');
 }
 
+// Fallback controls: allow service to boot using in-memory store if DB is unreachable
+const DB_FALLBACK_ON_FAIL = String(process.env.DB_FALLBACK_ON_FAIL || 'true').toLowerCase() === 'true';
+const FALLBACK_ERROR_CODES = new Set(['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND']);
+function isConnError(err) {
+  if (!err) return false;
+  if (err.code && FALLBACK_ERROR_CODES.has(err.code)) return true;
+  const subs = err.aggregateErrors || err.errors || [];
+  for (const e of subs) if (e && e.code && FALLBACK_ERROR_CODES.has(e.code)) return true;
+  return false;
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
 // In-memory fallback store (for local dev when DATABASE_URL is not set)
 const mem = {
   codes: new Map(), // codeStr -> { id, code, redeemed, note, created_at, redeemed_at, origin }
@@ -1242,12 +1254,50 @@ app.post('/admin/revoke-token', async (req, res) => {
 
 async function start() {
   try {
-    await initStorage();
+    try {
+      await initStorage();
+    } catch (e) {
+      // Retry a few times before falling back or exiting
+      const maxRetries = Number(process.env.DB_BOOT_RETRIES || 3);
+      const delayMs = Number(process.env.DB_BOOT_DELAY_MS || 2000);
+      let ok = false;
+      for (let i = 1; i <= maxRetries; i++) {
+        console.warn(`[DB] init failed (attempt ${i}/${maxRetries})`, e?.code || e?.message || e);
+        await sleep(delayMs);
+        try {
+          await initStorage();
+          ok = true;
+          break;
+        } catch (err) {
+          e = err;
+        }
+      }
+      if (!ok) {
+        if (DB_FALLBACK_ON_FAIL && isConnError(e)) {
+          console.error('[DB] falling back to in-memory store due to connection errors');
+          pool = null; // disable PG usage
+        } else {
+          throw e;
+        }
+      }
+    }
   } catch (e) {
     console.error('Failed to initialize storage:', e);
     process.exit(1);
     return;
   }
+  // Lightweight health endpoint for platform checks
+  app.get('/health', async (req, res) => {
+    if (pool) {
+      try {
+        await pool.query('SELECT 1');
+        return res.json({ ok: true, db: 'pg' });
+      } catch (e) {
+        return res.status(200).json({ ok: true, db: 'pg-error', code: e.code || null });
+      }
+    }
+    return res.json({ ok: true, db: 'memory' });
+  });
   app.listen(PORT, () => {
     console.log(`AuraSync backend listening on ${PORT}`);
   });

@@ -178,7 +178,8 @@ if (process.env.DATABASE_URL) {
 }
 
 // Fallback controls: allow service to boot using in-memory store if DB is unreachable
-const DB_FALLBACK_ON_FAIL = String(process.env.DB_FALLBACK_ON_FAIL || 'true').toLowerCase() === 'true';
+// In production, default to NO fallback (to avoid losing state across instances). In dev, default to true.
+const DB_FALLBACK_ON_FAIL = String(process.env.DB_FALLBACK_ON_FAIL ?? (process.env.NODE_ENV !== 'production' ? 'true' : 'false')).toLowerCase() === 'true';
 const FALLBACK_ERROR_CODES = new Set(['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND']);
 function isConnError(err) {
   if (!err) return false;
@@ -1181,7 +1182,7 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
     // Normalize and trim all inputs
     const email = normalizeEmail(req.valid.email);
     const token = String(req.valid.token || '').trim();
-    if (!email || !token) return res.status(400).json({ error: 'missing_email_or_token' });
+  if (!email || !token) return res.status(400).json({ error: 'missing_token' });
     if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
 
     // Rate limit per IP+email for lost-code
@@ -1199,14 +1200,19 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
     // Token lookup (allow revoked/expired tokens for recovery lookup only)
     const t = await dbGetToken(token);
     let codeRow = null;
+    if (process.env.LOG_LEVEL === 'debug') {
+      console.log('[lost-code] input', { email, token_len: token.length, db: pool ? 'pg' : 'memory', foundToken: !!t });
+    }
     if (t) {
       // Resolve ownership from token
       codeRow = await dbGetCodeByToken(token);
+      if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] via token -> codeRow?', !!codeRow);
     } else {
       // If token not found, user might have pasted their license code. Try matching it.
       const asCode = await dbFindCodeByPlainOrHash(token);
       if (!asCode) return res.status(404).json({ error: 'invalid_token' });
       codeRow = asCode;
+      if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] via code match -> codeRow?', !!codeRow);
     }
     if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
   const expectedEmail = normalizeEmail((codeRow.token_email || codeRow.note || '').toString());

@@ -573,6 +573,33 @@ async function dbGetCodeByToken(tokenStr) {
   }
 }
 
+// Helper: find a code row by matching plaintext or verifying code_hash
+async function dbFindCodeByPlainOrHash(codeStr) {
+  if (!codeStr) return null;
+  if (pool) {
+    const { rows } = await pool.query('SELECT id, code, code_hash, note, created_at FROM public.codes');
+    for (const r of rows) {
+      let ok = false;
+      if (r.code_hash) {
+        try { ok = await argon2.verify(r.code_hash, codeStr); } catch (_) { ok = false; }
+      }
+      if (!ok && r.code) ok = (r.code === codeStr);
+      if (ok) return r;
+    }
+    return null;
+  } else {
+    for (const c of mem.codes.values()) {
+      let ok = false;
+      if (c.code_hash) {
+        try { ok = await argon2.verify(c.code_hash, codeStr); } catch (_) { ok = false; }
+      }
+      if (!ok && c.code) ok = (c.code === codeStr);
+      if (ok) return { id: c.id, code: c.code, note: c.note, created_at: c.created_at };
+    }
+    return null;
+  }
+}
+
 async function sendEmail(to, subject, html) {
   if (!BREVO_API_KEY || !FROM_EMAIL) {
     console.warn('[EMAIL] Missing BREVO_API_KEY or FROM_EMAIL; skipping send');
@@ -1171,12 +1198,18 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
 
     // Token lookup (allow revoked/expired tokens for recovery lookup only)
     const t = await dbGetToken(token);
-    if (!t) return res.status(404).json({ error: 'invalid_token' });
-
-    // Resolve ownership from token
-    const codeRow = await dbGetCodeByToken(token);
+    let codeRow = null;
+    if (t) {
+      // Resolve ownership from token
+      codeRow = await dbGetCodeByToken(token);
+    } else {
+      // If token not found, user might have pasted their license code. Try matching it.
+      const asCode = await dbFindCodeByPlainOrHash(token);
+      if (!asCode) return res.status(404).json({ error: 'invalid_token' });
+      codeRow = asCode;
+    }
     if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
-    const expectedEmail = normalizeEmail(codeRow.token_email || codeRow.note || '');
+  const expectedEmail = normalizeEmail((codeRow.token_email || codeRow.note || '').toString());
     if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
 
     // Subscription check: require active Stripe sub for this email

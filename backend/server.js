@@ -1135,12 +1135,19 @@ app.post('/regenerate', async (req, res) => {
 });
 
 // --- Lost code self-service: validate active sub, 7-day cooldown, send new code ---
+
+// --- Lost code self-service: allow revoked/expired tokens for recovery lookup only ---
 app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
   try {
+    // Normalize and trim all inputs
+    const email = normalizeEmail(req.valid.email);
+    const token = String(req.valid.token || '').trim();
+    if (!email || !token) return res.status(400).json({ error: 'missing_email_or_token' });
+    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+
     // Rate limit per IP+email for lost-code
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
-    const rawEmail = String(req.body?.email || '').trim().toLowerCase();
-    const keyRL = `lost:${ip}:${rawEmail}`;
+    const keyRL = `lost:${ip}:${email}`;
     const nowMsRL = Date.now();
     let arrRL = rateLimitMap.get(keyRL) || [];
     arrRL = arrRL.filter(ts => nowMsRL - ts < RATE_LIMIT_WINDOW);
@@ -1150,29 +1157,17 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
     arrRL.push(nowMsRL);
     rateLimitMap.set(keyRL, arrRL);
 
-  const email = req.valid.email.toLowerCase();
-  const token = req.valid.token;
-    if (!email) return res.status(400).json({ error: 'missing_email' });
-    if (!token) return res.status(400).json({ error: 'missing_token' });
-    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
-
-    // Verify token exists and is valid (not revoked, not expired)
+    // Token lookup (allow revoked/expired tokens for recovery lookup only)
     const t = await dbGetToken(token);
-    const nowMs = Date.now();
     if (!t) return res.status(404).json({ error: 'invalid_token' });
-    const exp = t.expires_at || t.expiresAt;
-    if (t.revoked) return res.status(403).json({ error: 'token_revoked' });
-    if (!exp || exp <= nowMs) return res.status(403).json({ error: 'token_expired' });
 
-  // Get code associated with token and confirm email matches (prefer token.email if captured)
-  const codeRow = await dbGetCodeByToken(token);
-  if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
-  const storedTokenEmail = String(codeRow.token_email || '').toLowerCase();
-  const codeEmail = String(codeRow.note || '').toLowerCase();
-  const expectedEmail = storedTokenEmail || codeEmail;
-  if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
+    // Resolve ownership from token
+    const codeRow = await dbGetCodeByToken(token);
+    if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
+    const expectedEmail = normalizeEmail(codeRow.token_email || codeRow.note || '');
+    if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
 
-    // Verify customer exists and has active subscription
+    // Subscription check: require active Stripe sub for this email
     let customerId = null;
     const customers = await stripe.customers.list({ email, limit: 1 });
     if (customers?.data?.length) customerId = customers.data[0].id;
@@ -1180,7 +1175,7 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
     const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
     if (!subs?.data?.length) return res.status(403).json({ error: 'subscription_not_active' });
 
-    // Enforce 7-day cooldown since last issuance (unless bypassed for dev)
+    // Cooldown logic (unchanged)
     const bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';
     if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass);
     if (!bypass) {
@@ -1195,15 +1190,14 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
       }
     }
 
-    // Revoke current token and any tokens tied to the old code
-    await dbRevokeToken(token);
+    // Rotation: revoke current token and all tokens for this code
+    await dbRevokeToken(token); // ok if already revoked
     if (codeRow.id) await dbRevokeTokensByCodeId(codeRow.id);
+    const [newCode] = await dbCreateCodes(1, email);
+    await sendEmail(email, 'Your AuraSync license code', renderLicenseEmailHtml(newCode));
 
-    // Generate a new code and email it
-  const codes = await dbCreateCodes(1, email);
-  const newCode = codes[0];
-  await sendEmail(email, 'Your new AuraSync license code', renderLicenseEmailHtml(newCode));
-    return res.json({ success: true, message: 'New code sent to your email' });
+    // Success
+    return res.json({ success: true });
   } catch (e) {
     console.error('Lost-code error:', e);
     return res.status(500).json({ error: 'server_error' });

@@ -759,7 +759,7 @@ app.use((req, res, next) => {
 const STRICT_ALLOWED = new Set(['https://aurasync.info', 'https://www.aurasync.info']);
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && STRICT_ALLOWED.has(origin)) {
+  if (origin && (STRICT_ALLOWED.has(origin) || origin.startsWith('chrome-extension://'))) {
     res.header('Access-Control-Allow-Origin', origin);
   }
   res.header('Vary', 'Origin');

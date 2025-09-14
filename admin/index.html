@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AuraSync Admin – Test Lost Code</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    body{max-width:720px;margin:40px auto;padding:0 16px}
+    .card{background:var(--panel,#12121a);border:1px solid #2a2a3a;border-radius:12px;padding:16px 18px}
+    label{display:block;margin-top:12px;color:#cfd2ff}
+    input{width:100%;padding:10px 12px;margin-top:6px;border-radius:8px;border:1px solid #3a3a55;background:#0b0b12;color:#eef}
+    button{margin-top:16px}
+    .row{display:flex;gap:12px}
+    .row > *{flex:1}
+    .ok{color:#79ffa1}
+    .err{color:#ff8f8f}
+    small{color:#9aa3b2}
+  </style>
+</head>
+<body>
+  <h1>Admin: Test Lost Code</h1>
+  <p class="muted">Bypass the 7‑day limit for testing. Requires the backend ADMIN_SECRET.</p>
+
+  <div class="card">
+    <label>Email</label>
+    <input id="email" type="email" placeholder="user@example.com" />
+
+    <label>Activation token or license code</label>
+    <input id="token" type="text" placeholder="wi_xxx… or license code" />
+
+    <div class="row">
+      <div>
+        <label>Backend URL</label>
+        <input id="base" type="url" placeholder="https://api.aurasync.info" />
+      </div>
+      <div>
+        <label>Admin Secret</label>
+        <input id="secret" type="password" placeholder="ADMIN_SECRET" />
+      </div>
+    </div>
+
+    <button id="send" class="btn">Send replacement now (force)</button>
+    <div id="out" style="margin-top:12px"></div>
+    <small>Posts to <code>/lost-code</code> with <code>force=true</code> and Authorization: Bearer.</small>
+  </div>
+
+  <script>
+    const $ = (s)=>document.querySelector(s);
+    $('#send').addEventListener('click', async ()=>{
+      const email = $('#email').value.trim();
+      const token = $('#token').value.trim();
+      const base = ($('#base').value.trim()||location.origin).replace(/\/$/,'');
+      const secret = $('#secret').value.trim();
+      $('#out').textContent = 'Sending…';
+      try{
+        const res = await fetch(base + '/lost-code', {
+          method:'POST',
+          headers:{
+            'Content-Type':'application/json',
+            ...(secret? { 'Authorization': 'Bearer '+secret } : {})
+          },
+          body: JSON.stringify({ email, token, force:true })
+        });
+        const data = await res.json().catch(()=>({}));
+        if(res.ok){
+          $('#out').innerHTML = '<span class="ok">Success</span>: Replacement email sent.';
+        } else {
+          $('#out').innerHTML = '<span class="err">Error</span>: '+ (data.error || res.status);
+        }
+      }catch(e){
+        $('#out').innerHTML = '<span class="err">Error</span>: '+ e.message;
+      }
+    });
+  </script>
+</body>
+</html>

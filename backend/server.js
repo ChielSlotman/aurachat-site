@@ -94,7 +94,14 @@ const RedeemSchema = z.object({
   email: z.string().email().optional(),
   code: z.string().min(8).max(200).transform((s) => s.trim())
 });
-const LostCodeSchema = z.object({ email: z.string().email(), token: z.string().min(10).max(500) });
+const LostCodeSchema = z.object({
+  email: z.string().email(),
+  token: z.string().min(10).max(500),
+  // Optional testing override: when allowed, request can set force=true to bypass cooldown
+  // This is honored ONLY if Authorization: Bearer <ADMIN_SECRET> is provided OR
+  // env ALLOW_FORCE_LOST_CODE=true is set (intended for local/dev only)
+  force: z.boolean().optional(),
+});
 
 const PORT = process.env.PORT || 3000;
 const STORE_FILE = path.join(__dirname, 'store.json');
@@ -757,7 +764,8 @@ app.use((req, res, next) => {
   }
   res.header('Vary', 'Origin');
   res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // Allow admin testing headers too
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Secret');
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
@@ -1212,6 +1220,7 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
     // Normalize and trim all inputs
     const email = normalizeEmail(req.valid.email);
     const token = String(req.valid.token || '').trim();
+    const wantForce = Boolean(req.valid.force === true);
   if (!email || !token) return res.status(400).json({ error: 'missing_token' });
     if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
 
@@ -1260,9 +1269,20 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
       return res.status(403).json({ error: 'subscription_not_active' });
     }
 
-    // Cooldown logic (unchanged)
-    const bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';
-    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass);
+    // Cooldown logic: allow bypass if
+    //  - Authorization Bearer ADMIN_SECRET or X-Admin-Secret matches ADMIN_SECRET, or
+    //  - env DEV_BYPASS_REGEN_COOLDOWN=true, or
+    //  - env ALLOW_FORCE_LOST_CODE=true and body.force===true
+    let bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';
+    const auth = req.headers['authorization'] || '';
+    const hdrAdmin = req.headers['x-admin-secret'];
+    const isAdmin = (hdrAdmin && hdrAdmin === ADMIN_SECRET) || (auth && /^Bearer\s+/.test(auth) && auth.replace(/^Bearer\s+/i, '').trim() === ADMIN_SECRET);
+    if (!bypass) {
+      const allowForce = String(process.env.ALLOW_FORCE_LOST_CODE || '').toLowerCase() === 'true';
+      if (wantForce && allowForce) bypass = true;
+    }
+    if (!bypass && isAdmin && wantForce) bypass = true;
+    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass, { wantForce, isAdmin });
     if (!bypass) {
       const last = await dbLatestCodeForEmail(email);
       const sevenDays = 7 * 24 * 60 * 60 * 1000;
@@ -1289,10 +1309,51 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
   }
 });
 
+// Admin utility endpoint to test lost-code without cooldown
+app.post('/admin/test-lost-code', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  try {
+    const email = normalizeEmail(String(req.body?.email || ''));
+    const tokenOrCode = String(req.body?.token || req.body?.code || '').trim();
+    if (!email || !tokenOrCode) return res.status(400).json({ error: 'missing_params' });
+    // Simulate lost-code flow with bypass
+    req.valid = { email, token: tokenOrCode, force: true };
+    // Manually call handler logic by forwarding request — simplest is to call underlying operations
+    const t = await dbGetToken(tokenOrCode);
+    let codeRow = null;
+    if (t) {
+      codeRow = await dbGetCodeByToken(tokenOrCode);
+    } else {
+      codeRow = await dbFindCodeByPlainOrHash(tokenOrCode);
+    }
+    if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
+    const expectedEmail = normalizeEmail((codeRow.token_email || codeRow.note || '').toString());
+    if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
+    const active = await hasActiveSubscription(email);
+    if (!active) return res.status(403).json({ error: 'subscription_not_active' });
+    if (codeRow.id) await dbRevokeTokensByCodeId(codeRow.id);
+    const [newCode] = await dbCreateCodes(1, email);
+    await sendEmail(email, 'Your AuraSync license code', renderLicenseEmailHtml(newCode));
+    return res.json({ ok: true, codeSent: true });
+  } catch (e) {
+    console.error('Admin test-lost-code error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // --- Admin endpoints (simple secret in header) ---
 function checkAdmin(req, res) {
   const sec = req.headers['x-admin-secret'];
-  if (!sec || sec !== ADMIN_SECRET) {
+  let ok = (sec && sec === ADMIN_SECRET);
+  if (!ok) {
+    const auth = req.headers['authorization'] || '';
+    // Accept Bearer <ADMIN_SECRET>
+    if (auth && /^Bearer\s+.+/i.test(auth)) {
+      const token = auth.replace(/^Bearer\s+/i, '').trim();
+      ok = token === ADMIN_SECRET;
+    }
+  }
+  if (!ok) {
     res.status(403).json({ error: 'Forbidden' });
     return false;
   }

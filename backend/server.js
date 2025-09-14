@@ -1269,20 +1269,21 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
       return res.status(403).json({ error: 'subscription_not_active' });
     }
 
-    // Cooldown logic: allow bypass if
-    //  - Authorization Bearer ADMIN_SECRET or X-Admin-Secret matches ADMIN_SECRET, or
-    //  - env DEV_BYPASS_REGEN_COOLDOWN=true, or
-    //  - env ALLOW_FORCE_LOST_CODE=true and body.force===true
+    // Cooldown logic with kill-switch: FORCE_BYPASS_ENABLED must be true to allow any force/admin bypass.
+    // Otherwise, only DEV_BYPASS_REGEN_COOLDOWN=true affects behavior.
+    const forceEnabled = String(process.env.FORCE_BYPASS_ENABLED || '').toLowerCase() === 'true';
     let bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';
-    const auth = req.headers['authorization'] || '';
-    const hdrAdmin = req.headers['x-admin-secret'];
-    const isAdmin = (hdrAdmin && hdrAdmin === ADMIN_SECRET) || (auth && /^Bearer\s+/.test(auth) && auth.replace(/^Bearer\s+/i, '').trim() === ADMIN_SECRET);
-    if (!bypass) {
-      const allowForce = String(process.env.ALLOW_FORCE_LOST_CODE || '').toLowerCase() === 'true';
-      if (wantForce && allowForce) bypass = true;
+    if (forceEnabled) {
+      const auth = req.headers['authorization'] || '';
+      const hdrAdmin = req.headers['x-admin-secret'];
+      const isAdmin = (hdrAdmin && hdrAdmin === ADMIN_SECRET) || (auth && /^Bearer\s+/.test(auth) && auth.replace(/^Bearer\s+/i, '').trim() === ADMIN_SECRET);
+      if (!bypass) {
+        const allowForce = String(process.env.ALLOW_FORCE_LOST_CODE || '').toLowerCase() === 'true';
+        if (wantForce && allowForce) bypass = true;
+      }
+      if (!bypass && isAdmin && wantForce) bypass = true;
     }
-    if (!bypass && isAdmin && wantForce) bypass = true;
-    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass, { wantForce, isAdmin });
+    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass, { wantForce, forceEnabled });
     if (!bypass) {
       const last = await dbLatestCodeForEmail(email);
       const sevenDays = 7 * 24 * 60 * 60 * 1000;
@@ -1309,8 +1310,12 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
   }
 });
 
-// Admin utility endpoint to test lost-code without cooldown
+// Admin utility endpoint to test lost-code without cooldown (disabled unless FORCE_BYPASS_ENABLED=true)
 app.post('/admin/test-lost-code', async (req, res) => {
+  const forceEnabled = String(process.env.FORCE_BYPASS_ENABLED || '').toLowerCase() === 'true';
+  if (!forceEnabled) {
+    return res.status(404).json({ error: 'disabled' });
+  }
   if (!checkAdmin(req, res)) return;
   try {
     const email = normalizeEmail(String(req.body?.email || ''));

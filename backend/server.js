@@ -196,6 +196,7 @@ const mem = {
   tokens: new Map(), // tokenStr -> { id, token, premium, created_at, expires_at, revoked, code_id }
   redemptions: [], // { id, code_id, token_id, origin, created_at }
   nextId: { code: 1, token: 1, redemption: 1 },
+  licenses: new Map(), // email -> { email, plan, active, activated_at }
 };
 
 async function initStorage() {
@@ -460,6 +461,7 @@ async function dbRedeem(codeStr, origin, email) {
           ON CONFLICT (email)
           DO UPDATE SET active = true, plan = 'premium', activated_at = NOW()
         `, [email.toLowerCase()]);
+        try { mem.licenses.set(normalizeEmail(email), { email: normalizeEmail(email), plan: 'premium', active: true, activated_at: new Date().toISOString() }); } catch(_) {}
       }
       await q(client, 'commit', 'COMMIT');
       return { token, premium: true };
@@ -572,6 +574,34 @@ async function dbGetCodeByToken(tokenStr) {
     }
     return null;
   }
+}
+
+// Subscription helpers
+async function hasActiveSubscription(email) {
+  const norm = normalizeEmail(email);
+  // 1) Stripe direct check
+  if (stripe) {
+    try {
+      const customers = await stripe.customers.list({ email: norm, limit: 1 });
+      const customerId = customers?.data?.[0]?.id || null;
+      if (customerId) {
+        const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
+        if (subs?.data?.length) return true;
+      }
+    } catch (_) { /* fall through */ }
+  }
+  // 2) DB licenses table
+  if (pool) {
+    try {
+      const { rows } = await pool.query('SELECT active FROM licenses WHERE email=$1', [norm]);
+      if (rows.length && rows[0].active === true) return true;
+    } catch (_) {}
+  } else {
+    // 3) In-memory fallback
+    const lic = mem.licenses.get(norm);
+    if (lic && lic.active) return true;
+  }
+  return false;
 }
 
 // Helper: find a code row by matching plaintext or verifying code_hash
@@ -1218,13 +1248,17 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
   const expectedEmail = normalizeEmail((codeRow.token_email || codeRow.note || '').toString());
     if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
 
-    // Subscription check: require active Stripe sub for this email
-    let customerId = null;
-    const customers = await stripe.customers.list({ email, limit: 1 });
-    if (customers?.data?.length) customerId = customers.data[0].id;
-    if (!customerId) return res.status(404).json({ error: 'customer_not_found' });
-    const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
-    if (!subs?.data?.length) return res.status(403).json({ error: 'subscription_not_active' });
+    // Subscription check: Require active subscription; support fallback license source when Stripe data is delayed
+    const active = await hasActiveSubscription(email);
+    if (!active) {
+      if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] subscription_not_active or customer_not_found for', email);
+      // Mirror prior error surface: customer_not_found if Stripe had no customer, otherwise subscription_not_active
+      try {
+        const customers = await stripe.customers.list({ email, limit: 1 });
+        if (!customers?.data?.length) return res.status(404).json({ error: 'customer_not_found' });
+      } catch (_) {}
+      return res.status(403).json({ error: 'subscription_not_active' });
+    }
 
     // Cooldown logic (unchanged)
     const bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';

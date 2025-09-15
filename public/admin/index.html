@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>AuraSync Admin</title>
+<style>
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; max-width: 1100px; margin: 24px auto; }
+  h1 { margin: 0 0 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  input, select, button { padding: 8px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+  tr:hover { background: #fafafa; }
+  code { background: #f2f2f2; padding: 2px 4px; border-radius: 4px; }
+</style>
+
+<h1>AuraSync Admin</h1>
+
+<div class="row">
+  <label>Admin Secret
+    <input id="sec" type="password" placeholder="paste ADMIN_SECRET">
+  </label>
+</div>
+
+<div class="row">
+  <input id="q" placeholder="search email">
+  <button onclick="load()">Search</button>
+</div>
+
+<div class="row">
+  <input id="newEmail" placeholder="grant to email">
+  <select id="plan">
+    <option value="premium">premium</option>
+    <option value="monthly">monthly</option>
+    <option value="yearly">yearly</option>
+    <option value="lifetime">lifetime</option>
+  </select>
+  <button onclick="grant()">Grant License</button>
+</div>
+
+<div id="out"></div>
+
+<script>
+function hdrs() {
+  const s = document.getElementById('sec').value.trim();
+  const h = { 'Content-Type': 'application/json' };
+  if (s) h['Authorization'] = 'Bearer ' + s;
+  return h;
+}
+async function load() {
+  const q = document.getElementById('q').value.trim();
+  const r = await fetch(`/admin/customers?query=${encodeURIComponent(q)}`, { headers: hdrs() });
+  const j = await r.json();
+  if (!j.customers) { document.getElementById('out').innerHTML = `<p><b>Error:</b> ${JSON.stringify(j)}</p>`; return; }
+  const rows = j.customers.map(c => `
+    <tr>
+      <td>${c.email}</td>
+      <td>${c.license?.plan ?? ''}</td>
+      <td>${c.license?.active ? 'active' : 'inactive'}</td>
+      <td>${c.codes?.[0]?.created_at ? new Date(Number(c.codes[0].created_at)).toLocaleString() : ''}</td>
+      <td>${(c.tokens||[]).filter(t=>!t.revoked).length} active</td>
+      <td>
+        <button onclick="regen('${c.email}', '${c.license?.plan ?? 'premium'}')">New Code</button>
+        <button onclick="revokeAll('${c.email}')">Revoke</button>
+      </td>
+    </tr>`).join('');
+  document.getElementById('out').innerHTML =
+    `<table><tr><th>Email</th><th>Plan</th><th>Status</th><th>Last code</th><th>Tokens</th><th>Actions</th></tr>${rows}</table>`;
+}
+async function grant() {
+  const email = document.getElementById('newEmail').value.trim();
+  const plan = document.getElementById('plan').value;
+  const r = await fetch('/admin/grant-license', { method:'POST', headers: hdrs(), body: JSON.stringify({ email, plan }) });
+  alert(JSON.stringify(await r.json(), null, 2));
+  load();
+}
+async function revokeAll(email) {
+  if (!confirm('Revoke all tokens for ' + email + '?')) return;
+  const r = await fetch('/admin/revoke-email', { method:'POST', headers: hdrs(), body: JSON.stringify({ email }) });
+  alert(JSON.stringify(await r.json(), null, 2));
+  load();
+}
+async function regen(email, plan) {
+  const r = await fetch('/admin/grant-license', { method:'POST', headers: hdrs(), body: JSON.stringify({ email, plan }) });
+  alert(JSON.stringify(await r.json(), null, 2));
+  load();
+}
+</script>

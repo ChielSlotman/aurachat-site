@@ -1,0 +1,10 @@
+{
+  "name": "aurachat-site",
+  "version": "1.0.0",
+  "main": "backend/server.js",
+  "scripts": {
+    "start:dev": "node backend/server.js",
+    "admin": "node backend/server.js"
+  },
+  "dependencies": {}
+}

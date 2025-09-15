@@ -1,3 +1,123 @@
+// --- Admin helpers: accept Bearer or X-Admin-Secret ---
+function checkAdmin(req, res) {
+  const s = process.env.ADMIN_SECRET || '';
+  const h = req.headers['x-admin-secret'] || (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  if (!s || !h || h !== s) {
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+// Normalize email helper
+function normalizeEmail(e) { return String(e || '').trim().toLowerCase(); }
+
+// GET /admin/customers
+app.get('/admin/customers', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const q = normalizeEmail(req.query.query || '');
+
+  try {
+    const customers = [];
+    if (!pool) {
+      // memory mode
+      const seen = new Map();
+      for (const [email, lic] of mem.licenses.entries()) {
+        if (q && !email.includes(q)) continue;
+        seen.set(email, { email, license: lic, codes: [], tokens: [] });
+      }
+      for (const [, c] of mem.codes.entries()) {
+        const email = normalizeEmail(c.note || '');
+        if (!email || (q && !email.includes(q))) continue;
+        if (!seen.has(email)) seen.set(email, { email, license: mem.licenses.get(email) || null, codes: [], tokens: [] });
+        const status = c.status || (c.redeemed ? 'used' : 'active');
+        seen.get(email).codes.push({ id: c.id, created_at: c.created_at, status });
+      }
+      for (const [, t] of mem.tokens.entries()) {
+        const email = normalizeEmail(t.email || '');
+        if (!email || (q && !email.includes(q))) continue;
+        if (!seen.has(email)) seen.set(email, { email, license: mem.licenses.get(email) || null, codes: [], tokens: [] });
+        seen.get(email).tokens.push({ token: t.token, revoked: t.revoked, expires_at: t.expires_at, premium: t.premium });
+      }
+      for (const v of seen.values()) {
+        v.codes.sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+        v.tokens.sort((a,b)=>Number(new Date(b.created_at))-Number(new Date(a.created_at)));
+        v.codes = v.codes.slice(0,10);
+        v.tokens = v.tokens.slice(0,10);
+        customers.push(v);
+      }
+      return res.json({ customers });
+    }
+
+    // Postgres path
+    const where = q ? `WHERE LOWER(email) LIKE $1` : ``;
+    const param = q ? [`%${q}%`] : [];
+    const { rows: lic } = await pool.query(`SELECT email, plan, active, activated_at FROM licenses ${where} ORDER BY email ASC`, param);
+    for (const L of lic) {
+      const email = normalizeEmail(L.email);
+      const { rows: codes } = await pool.query(
+        `SELECT id, created_at, status, redeemed FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 10`, [email]
+      );
+      const { rows: tokens } = await pool.query(
+        `SELECT token, revoked, expires_at, premium, created_at FROM tokens WHERE email=$1 ORDER BY created_at DESC LIMIT 10`, [email]
+      );
+      customers.push({
+        email,
+        license: { plan: L.plan, active: L.active, activated_at: L.activated_at },
+        codes: codes.map(c => ({ id: c.id, created_at: c.created_at, status: c.status ?? (c.redeemed ? 'used' : 'active') })),
+        tokens: tokens.map(t => ({ token: t.token, revoked: t.revoked, expires_at: t.expires_at, premium: t.premium }))
+      });
+    }
+    res.json({ customers });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// POST /admin/grant-license
+app.post('/admin/grant-license', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const email = normalizeEmail(req.body?.email);
+  const plan = String(req.body?.plan || 'premium').toLowerCase();
+  if (!email) return res.status(400).json({ error: 'missing_email' });
+
+  try {
+    if (pool) {
+      await pool.query(`
+        INSERT INTO licenses (email, plan, active, activated_at)
+        VALUES ($1, $2, true, NOW())
+        ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
+      `, [email, plan]);
+    } else {
+      mem.licenses.set(email, { email, plan, active: true, activated_at: new Date().toISOString() });
+    }
+    const [code] = await dbCreateCodes(1, email); // reuse existing helper
+    res.json({ ok: true, code });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// POST /admin/revoke-email
+app.post('/admin/revoke-email', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const email = normalizeEmail(req.body?.email);
+  if (!email) return res.status(400).json({ error: 'missing_email' });
+  try {
+    await dbRevokeTokensByEmail(email); // reuse existing helper
+    if (pool) await pool.query(`UPDATE licenses SET active=false WHERE email=$1`, [email]);
+    else if (mem.licenses.has(email)) mem.licenses.get(email).active = false;
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+// Serve static admin UI
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../public')));
 // Normalize email: lowercase, trim, Gmail dots/+ collapse
 function normalizeEmail(email) {
   if (!email) return '';
@@ -759,7 +879,7 @@ app.use((req, res, next) => {
 const STRICT_ALLOWED = new Set(['https://aurasync.info', 'https://www.aurasync.info']);
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && (STRICT_ALLOWED.has(origin) || origin.startsWith('chrome-extension://'))) {
+  if (origin && STRICT_ALLOWED.has(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   }
   res.header('Vary', 'Origin');
@@ -1269,21 +1389,20 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
       return res.status(403).json({ error: 'subscription_not_active' });
     }
 
-    // Cooldown logic with kill-switch: FORCE_BYPASS_ENABLED must be true to allow any force/admin bypass.
-    // Otherwise, only DEV_BYPASS_REGEN_COOLDOWN=true affects behavior.
-    const forceEnabled = String(process.env.FORCE_BYPASS_ENABLED || '').toLowerCase() === 'true';
+    // Cooldown logic: allow bypass if
+    //  - Authorization Bearer ADMIN_SECRET or X-Admin-Secret matches ADMIN_SECRET, or
+    //  - env DEV_BYPASS_REGEN_COOLDOWN=true, or
+    //  - env ALLOW_FORCE_LOST_CODE=true and body.force===true
     let bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';
-    if (forceEnabled) {
-      const auth = req.headers['authorization'] || '';
-      const hdrAdmin = req.headers['x-admin-secret'];
-      const isAdmin = (hdrAdmin && hdrAdmin === ADMIN_SECRET) || (auth && /^Bearer\s+/.test(auth) && auth.replace(/^Bearer\s+/i, '').trim() === ADMIN_SECRET);
-      if (!bypass) {
-        const allowForce = String(process.env.ALLOW_FORCE_LOST_CODE || '').toLowerCase() === 'true';
-        if (wantForce && allowForce) bypass = true;
-      }
-      if (!bypass && isAdmin && wantForce) bypass = true;
+    const auth = req.headers['authorization'] || '';
+    const hdrAdmin = req.headers['x-admin-secret'];
+    const isAdmin = (hdrAdmin && hdrAdmin === ADMIN_SECRET) || (auth && /^Bearer\s+/.test(auth) && auth.replace(/^Bearer\s+/i, '').trim() === ADMIN_SECRET);
+    if (!bypass) {
+      const allowForce = String(process.env.ALLOW_FORCE_LOST_CODE || '').toLowerCase() === 'true';
+      if (wantForce && allowForce) bypass = true;
     }
-    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass, { wantForce, forceEnabled });
+    if (!bypass && isAdmin && wantForce) bypass = true;
+    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass, { wantForce, isAdmin });
     if (!bypass) {
       const last = await dbLatestCodeForEmail(email);
       const sevenDays = 7 * 24 * 60 * 60 * 1000;
@@ -1310,12 +1429,8 @@ app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
   }
 });
 
-// Admin utility endpoint to test lost-code without cooldown (disabled unless FORCE_BYPASS_ENABLED=true)
+// Admin utility endpoint to test lost-code without cooldown
 app.post('/admin/test-lost-code', async (req, res) => {
-  const forceEnabled = String(process.env.FORCE_BYPASS_ENABLED || '').toLowerCase() === 'true';
-  if (!forceEnabled) {
-    return res.status(404).json({ error: 'disabled' });
-  }
   if (!checkAdmin(req, res)) return;
   try {
     const email = normalizeEmail(String(req.body?.email || ''));

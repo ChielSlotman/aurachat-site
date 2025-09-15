@@ -1394,6 +1394,103 @@ app.post('/admin/revoke-token', async (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Admin: customers overview (active licenses, recent codes/tokens) ---
+// GET /admin/customers?query=foo  → returns customers with active license matching email fragment
+app.get('/admin/customers', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const q = normalizeEmail(String(req.query?.query || ''));
+  try {
+    const customers = [];
+    if (!pool) {
+      // memory store: iterate licenses
+      for (const [email, lic] of mem.licenses.entries()) {
+        if (!lic?.active) continue;
+        if (q && !email.includes(q)) continue;
+        const codes = [];
+        const tokens = [];
+        for (const c of mem.codes.values()) {
+          const e = normalizeEmail(c.note || '');
+          if (e === email) codes.push({ id: c.id, created_at: c.created_at, status: c.status || (c.redeemed ? 'used' : 'active') });
+        }
+        for (const [tok, t] of mem.tokens.entries()) {
+          const e = normalizeEmail(t.email || '');
+          if (e === email) tokens.push({ token: tok, revoked: !!t.revoked, created_at: t.created_at, expires_at: t.expires_at, premium: !!t.premium });
+        }
+        codes.sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+        tokens.sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+        customers.push({ email, license: lic, codes: codes.slice(0,10), tokens: tokens.slice(0,10) });
+      }
+      return res.json({ customers });
+    }
+
+    // Postgres-backed: list active licenses (optionally filtered)
+    const where = q ? `WHERE active = true AND LOWER(email) LIKE $1` : `WHERE active = true`;
+    const params = q ? [`%${q}%`] : [];
+    const { rows: lic } = await pool.query(`SELECT email, plan, active, activated_at FROM licenses ${where} ORDER BY email ASC`, params);
+    for (const L of lic) {
+      const email = normalizeEmail(L.email);
+      const { rows: codes } = await pool.query(
+        `SELECT id, created_at, status, redeemed FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 10`, [email]
+      );
+      const { rows: tokens } = await pool.query(
+        `SELECT token, revoked, expires_at, premium, created_at FROM tokens WHERE email=$1 ORDER BY created_at DESC LIMIT 10`, [email]
+      );
+      customers.push({
+        email,
+        license: { plan: L.plan, active: L.active, activated_at: L.activated_at },
+        codes: codes.map(c => ({ id: c.id, created_at: c.created_at, status: c.status ?? (c.redeemed ? 'used' : 'active') })),
+        tokens: tokens.map(t => ({ token: t.token, revoked: t.revoked, expires_at: t.expires_at, premium: t.premium, created_at: t.created_at }))
+      });
+    }
+    res.json({ customers });
+  } catch (e) {
+    console.error('admin/customers error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// --- Admin: grant license and issue a new code ---
+// POST /admin/grant-license { email, plan }
+app.post('/admin/grant-license', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const email = normalizeEmail(String(req.body?.email || ''));
+  const plan = String(req.body?.plan || 'premium').toLowerCase();
+  if (!email) return res.status(400).json({ error: 'missing_email' });
+  try {
+    if (pool) {
+      await pool.query(`
+        INSERT INTO licenses (email, plan, active, activated_at)
+        VALUES ($1, $2, true, NOW())
+        ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
+      `, [email, plan]);
+    } else {
+      mem.licenses.set(email, { email, plan, active: true, activated_at: new Date().toISOString() });
+    }
+    const [code] = await dbCreateCodes(1, email);
+    res.json({ ok: true, code });
+  } catch (e) {
+    console.error('admin/grant-license error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// --- Admin: revoke all tokens for an email and deactivate license ---
+// POST /admin/revoke-email { email }
+app.post('/admin/revoke-email', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const email = normalizeEmail(String(req.body?.email || ''));
+  if (!email) return res.status(400).json({ error: 'missing_email' });
+  try {
+    await dbRevokeTokensByEmail(email);
+    if (pool) await pool.query(`UPDATE licenses SET active=false WHERE email=$1`, [email]);
+    else if (mem.licenses.has(email)) mem.licenses.get(email).active = false;
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('admin/revoke-email error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 async function start() {
   try {
     try {

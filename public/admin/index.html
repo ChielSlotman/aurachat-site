@@ -45,6 +45,8 @@
     const url = new URL(location.href);
     const s = url.searchParams.get('sec');
     if (s) document.getElementById('sec').value = s;
+    // Auto-load list on arrival when secret is provided
+    if (s) setTimeout(() => load().catch(()=>{}), 50);
   }catch(_){}
 })();
 function hdrs() {

@@ -27,6 +27,7 @@ if not exist "node_modules" (
 )
 
 REM Run the Electron admin app
-start "AuraSync Admin" cmd /c "npx electron ./admin-app/main.js"
+echo Launching AuraSync Admin...
+call npx electron ./admin-app/main.js
 
 endlocal

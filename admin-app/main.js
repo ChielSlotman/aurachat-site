@@ -1,19 +1,20 @@
 // Minimal Electron wrapper to run the backend and open the Admin UI
 const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
 const crypto = require('crypto');
 require('dotenv').config();
 
+// Ensure fetch exists in this process
+const _fetch = (typeof fetch !== 'undefined') ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
+
 const PORT = process.env.PORT || 3000;
-let serverProc = null;
 let runtimeSecret = process.env.ADMIN_SECRET || '';
 
 async function waitForHealth(url, timeoutMs = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(url);
+      const res = await _fetch(url);
       if (res.ok) return true;
     } catch (_) {}
     await new Promise(r => setTimeout(r, 500));
@@ -21,19 +22,15 @@ async function waitForHealth(url, timeoutMs = 15000) {
   return false;
 }
 
-function startServer() {
-  if (!runtimeSecret) {
-    runtimeSecret = crypto.randomBytes(16).toString('hex');
-  }
-  const nodePath = process.execPath; // current Node used by Electron
-  const script = path.join(__dirname, '..', 'backend', 'server.js');
-  serverProc = spawn(nodePath, [script], {
-    cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: String(PORT), ADMIN_SECRET: runtimeSecret },
-    stdio: 'ignore',
-    windowsHide: true,
-    detached: false,
-  });
+function startServerInline() {
+  if (!runtimeSecret) runtimeSecret = crypto.randomBytes(16).toString('hex');
+  // Set env before requiring the backend so it picks up the secret and port
+  process.env.PORT = String(PORT);
+  process.env.ADMIN_SECRET = runtimeSecret;
+  // Require the backend in-process
+  const serverPath = path.join(__dirname, '..', 'backend', 'server.js');
+  // eslint-disable-next-line global-require, import/no-dynamic-require
+  require(serverPath);
 }
 
 function createWindow() {
@@ -51,7 +48,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  startServer();
+  startServerInline();
   const ok = await waitForHealth(`http://localhost:${PORT}/health`);
   if (!ok) {
     dialog.showErrorBox('AuraSync', 'Backend did not start in time. Please check logs or run backend/server.js manually.');
@@ -68,5 +65,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  try { if (serverProc && !serverProc.killed) serverProc.kill(); } catch (_) {}
+  // No child process to kill when running inline
 });

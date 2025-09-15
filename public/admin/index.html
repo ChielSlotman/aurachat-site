@@ -39,6 +39,14 @@
 <div id="out"></div>
 
 <script>
+// Prefill secret from ?sec= parameter when launched by the desktop app
+(function(){
+  try{
+    const url = new URL(location.href);
+    const s = url.searchParams.get('sec');
+    if (s) document.getElementById('sec').value = s;
+  }catch(_){}
+})();
 function hdrs() {
   const s = document.getElementById('sec').value.trim();
   const h = { 'Content-Type': 'application/json' };

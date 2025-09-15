@@ -2,10 +2,12 @@
 const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const PORT = process.env.PORT || 3000;
 let serverProc = null;
+let runtimeSecret = process.env.ADMIN_SECRET || '';
 
 async function waitForHealth(url, timeoutMs = 15000) {
   const start = Date.now();
@@ -20,11 +22,14 @@ async function waitForHealth(url, timeoutMs = 15000) {
 }
 
 function startServer() {
+  if (!runtimeSecret) {
+    runtimeSecret = crypto.randomBytes(16).toString('hex');
+  }
   const nodePath = process.execPath; // current Node used by Electron
   const script = path.join(__dirname, '..', 'backend', 'server.js');
   serverProc = spawn(nodePath, [script], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: String(PORT) },
+    env: { ...process.env, PORT: String(PORT), ADMIN_SECRET: runtimeSecret },
     stdio: 'ignore',
     windowsHide: true,
     detached: false,
@@ -39,7 +44,7 @@ function createWindow() {
     title: 'AuraSync Admin',
     show: false,
   });
-  const url = `http://localhost:${PORT}/admin/`;
+  const url = `http://localhost:${PORT}/admin/?sec=${encodeURIComponent(runtimeSecret)}`;
   win.loadURL(url);
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => { /* noop */ });

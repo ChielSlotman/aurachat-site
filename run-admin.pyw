@@ -2,12 +2,13 @@ import os, sys, time, socket, subprocess, threading, webbrowser, random, string
 import tkinter as tk
 from tkinter import messagebox
 try:
-    import urllib.request
+    from urllib.request import urlopen
 except Exception:
-    urllib = None
+    urlopen = None
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT_START = int(os.environ.get('PORT', '3000'))
+LOG_FILE = os.path.join(ROOT, 'backend.log')
 
 def rand_hex(n=32):
     return ''.join(random.choice('0123456789abcdef') for _ in range(n))
@@ -28,7 +29,9 @@ def wait_health(port, timeout=15):
     url = f'http://127.0.0.1:{port}/health'
     while time.time() - start < timeout:
         try:
-            with urllib.request.urlopen(url, timeout=0.8) as resp:
+            if urlopen is None:
+                return False
+            with urlopen(url, timeout=0.8) as resp:
                 if resp.status == 200:
                     return True
         except Exception:
@@ -48,9 +51,19 @@ def ensure_npm_install():
     backend_dir = os.path.join(ROOT, 'backend')
     if os.path.exists(os.path.join(backend_dir, 'package.json')) and not os.path.exists(os.path.join(backend_dir, 'node_modules')):
         try:
-            subprocess.check_call(['npm', 'install'], cwd=backend_dir, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            # Keep quiet and skip audits for speed
+            subprocess.check_call(['npm', 'install', '--no-audit', '--no-fund'], cwd=backend_dir, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except Exception:
             pass
+
+def node_version_ok():
+    try:
+        out = subprocess.check_output('node -v', shell=True, stderr=subprocess.STDOUT)
+        v = out.decode().strip().lstrip('v')
+        major = int(v.split('.')[0])
+        return (major >= 18, v)
+    except Exception:
+        return (False, None)
 
 def start_backend(port, secret):
     env = os.environ.copy()
@@ -58,7 +71,25 @@ def start_backend(port, secret):
     env['ADMIN_SECRET'] = secret
     # Keep window hidden
     flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-    return subprocess.Popen(['node', os.path.join(ROOT, 'backend', 'server.js')], cwd=ROOT, env=env, creationflags=flags)
+    # Append output to log for diagnostics
+    logf = None
+    try:
+        logf = open(LOG_FILE, 'a', encoding='utf-8', errors='ignore')
+        try:
+            logf.write(f"\n=== Launch {time.strftime('%Y-%m-%d %H:%M:%S')} PORT={port} ===\n")
+            logf.flush()
+        except Exception:
+            pass
+    except Exception:
+        logf = None
+    return subprocess.Popen(
+        ['node', os.path.join(ROOT, 'backend', 'server.js')],
+        cwd=ROOT,
+        env=env,
+        creationflags=flags,
+        stdout=(logf or subprocess.DEVNULL),
+        stderr=(logf or subprocess.DEVNULL)
+    )
 
 def main():
     if not have_cmd('node'):
@@ -67,18 +98,42 @@ def main():
     if not have_cmd('npm'):
         messagebox.showerror('AuraSync', 'npm is required. It comes with Node.js installer.')
         return
+    ok_ver, node_ver = node_version_ok()
+    if not ok_ver:
+        messagebox.showerror('AuraSync', f'Node 18+ is required. Detected: {node_ver or "unknown"}. Please install Node.js 18 or newer from nodejs.org')
+        return
     ensure_npm_install()
+    # Verify a key dependency exists after install to avoid silent failures
+    if not os.path.exists(os.path.join(ROOT, 'backend', 'node_modules', 'express')):
+        # Try once more
+        ensure_npm_install()
+        if not os.path.exists(os.path.join(ROOT, 'backend', 'node_modules', 'express')):
+            messagebox.showerror('AuraSync', 'Dependency install failed. Please open a terminal and run "npm install" in the backend folder, then try again.')
+            return
 
     port = find_port()
     secret = os.environ.get('ADMIN_SECRET') or rand_hex(24)
     proc = start_backend(port, secret)
-    ok = wait_health(port, timeout=18)
+    ok = wait_health(port, timeout=25)
     if not ok:
         try:
             proc.terminate()
         except Exception:
             pass
-        messagebox.showerror('AuraSync', 'Backend did not start. Check your internet or try again.')
+        # Surface last 10 lines of the log to help diagnose
+        tail = ''
+        try:
+            with open(LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()[-20:]
+                tail = ''.join(lines).strip()
+        except Exception:
+            tail = ''
+        msg = 'Backend did not start. Ensure Node 18+ and dependencies are installed. '
+        if tail:
+            # Keep it short
+            snippet = tail[-900:]
+            msg += f"\n\nLast log lines:\n{snippet}"
+        messagebox.showerror('AuraSync', msg)
         return
 
     root = tk.Tk()
@@ -96,6 +151,11 @@ def main():
     btn_row = tk.Frame(root)
     btn_row.pack(pady=6)
     tk.Button(btn_row, text='Open Admin', width=14, command=open_admin).pack(side=tk.LEFT, padx=6)
+    def open_logs():
+        try:
+            os.startfile(LOG_FILE)
+        except Exception:
+            messagebox.showinfo('AuraSync', f'Log file at: {LOG_FILE}')
     def do_quit():
         try:
             proc.terminate()
@@ -103,6 +163,7 @@ def main():
             pass
         root.destroy()
     tk.Button(btn_row, text='Quit', width=10, command=do_quit).pack(side=tk.LEFT, padx=6)
+    tk.Button(btn_row, text='Open Logs', width=12, command=open_logs).pack(side=tk.LEFT, padx=6)
 
     # Auto-open once
     root.after(400, open_admin)

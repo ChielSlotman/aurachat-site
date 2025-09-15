@@ -2,12 +2,35 @@
 const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 const crypto = require('crypto');
+const net = require('net');
 require('dotenv').config();
 
 // Ensure fetch exists in this process
 const _fetch = (typeof fetch !== 'undefined') ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
-const PORT = process.env.PORT || 3000;
+let PORT = Number(process.env.PORT || 3000);
+function checkPort(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.once('listening', () => srv.close(() => resolve(true)));
+    srv.listen(port, '127.0.0.1');
+  });
+}
+
+async function findOpenPort(preferred = 3000) {
+  const candidates = [preferred, preferred + 1, preferred + 2, preferred + 3, preferred + 4, preferred + 5];
+  for (const p of candidates) {
+    // If a server is already running on this port and responds to /health, use it
+    try {
+      const r = await _fetch(`http://127.0.0.1:${p}/health`);
+      if (r.ok) return p;
+    } catch (_) {}
+    const ok = await checkPort(p);
+    if (ok) return p;
+  }
+  return preferred; // fallback
+}
 let runtimeSecret = process.env.ADMIN_SECRET || '';
 
 async function waitForHealth(url, timeoutMs = 15000) {
@@ -48,6 +71,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  PORT = await findOpenPort(PORT);
   startServerInline();
   const ok = await waitForHealth(`http://localhost:${PORT}/health`);
   if (!ok) {

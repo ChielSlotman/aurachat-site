@@ -25,9 +25,12 @@ if not exist "node_modules" (
   echo Installing dependencies (this can take a minute)...
   call npm install
 )
+REM Ensure electron is available (devDependency)
+call npm ls electron >NUL 2>&1 || call npm install electron --save-dev
 
 REM Run the Electron admin app
-echo Launching AuraSync Admin...
-call npx electron ./admin-app/main.js
+echo Launching AuraSync Admin window...
+start "AuraSync Admin" cmd /c "npx electron ./admin-app/main.js"
+echo If the window did not appear, check that your antivirus isn't blocking Electron.
 
 endlocal

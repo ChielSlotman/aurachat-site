@@ -913,6 +913,13 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
 
 // After webhook: global parsers for JSON and urlencoded
 app.use(express.json());
+
+// Serve static files (admin UI lives in ../public/admin/index.html)
+app.use(express.static(path.join(__dirname, '../public')));
+// Ensure /admin/ directory path resolves to index.html explicitly
+app.get(['/admin', '/admin/'], (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/admin/index.html'));
+});
 app.use(express.urlencoded({ extended: true }));
 // Compression
 app.use(compression());

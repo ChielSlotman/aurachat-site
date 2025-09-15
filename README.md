@@ -52,6 +52,17 @@ Endpoints:
 
 In production, required envs are enforced: STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET.
 
+## Windows Admin Launcher
+
+To run the local admin UI on Windows without a console window:
+
+- Double-click `run-admin-py.bat`.
+- It launches a small Python GUI (`run-admin.pyw`) that starts the backend, waits for health, and opens the Admin page with the admin secret prefilled.
+
+Requirements:
+- Python 3.x installed and available on PATH (it will try `pythonw.exe`, then `python.exe`, then `py.exe`).
+- Node.js and npm installed (the first run will install backend dependencies automatically).
+
 ## SEO
 
 Static files `robots.txt` and `sitemap.xml` are included at the web root.

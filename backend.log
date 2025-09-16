@@ -88,3 +88,505 @@ Require stack:
 }
 
 Node.js v22.19.0
+
+=== Launch 2025-09-16 16:33:20 PORT=3000 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3000
+{"level":30,"time":1758033201399,"pid":14516,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758033201403,"pid":14516,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033202152,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033202162,"pid":14516,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033202239,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033202241,"pid":14516,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033202410,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033202413,"pid":14516,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033206484,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033206486,"pid":14516,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758033207164,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033207166,"pid":14516,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758033207764,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033207765,"pid":14516,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758033208492,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033208493,"pid":14516,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758033208668,"pid":14516,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033208669,"pid":14516,"hostname":"Michael","status":304,"msg":"res"}
+
+=== Launch 2025-09-16 16:33:57 PORT=3001 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3001
+{"level":30,"time":1758033237652,"pid":7056,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758033237656,"pid":7056,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033238383,"pid":7056,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033238390,"pid":7056,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033238451,"pid":7056,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033238455,"pid":7056,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033238595,"pid":7056,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033238597,"pid":7056,"hostname":"Michael","status":200,"msg":"res"}
+
+=== Launch 2025-09-16 16:42:49 PORT=3002 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3002
+{"level":30,"time":1758033770338,"pid":19248,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758033770342,"pid":19248,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033771068,"pid":19248,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033771076,"pid":19248,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033771158,"pid":19248,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033771163,"pid":19248,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033771217,"pid":19248,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033771218,"pid":19248,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033771241,"pid":19248,"hostname":"Michael","method":"GET","path":"/favicon.ico","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033771244,"pid":19248,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758033771296,"pid":19248,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033771298,"pid":19248,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033779037,"pid":19248,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033779037,"pid":19248,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758033779040,"pid":19248,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758033779041,"pid":19248,"hostname":"Michael","status":304,"msg":"res"}
+
+=== Launch 2025-09-16 16:47:19 PORT=3003 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3003
+{"level":30,"time":1758034039838,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758034039843,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034040665,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034040674,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034040835,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034040838,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034040948,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034040949,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034040987,"pid":16900,"hostname":"Michael","method":"GET","path":"/favicon.ico","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034040993,"pid":16900,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758034041036,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034041039,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034041043,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034041045,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034047232,"pid":16900,"hostname":"Michael","method":"GET","path":"/.well-known/appspecific/com.chrome.devtools.json","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034047233,"pid":16900,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758034054055,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034054055,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034054058,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034054059,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034056029,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034056030,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034058996,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034058997,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034058998,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034058999,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034059613,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034059614,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034060877,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034060877,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034060878,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034060879,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034061172,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061173,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034061174,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061175,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034061324,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061325,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034061326,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061327,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034061500,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061500,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034061501,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061502,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034061932,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061932,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034061933,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034061934,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034063053,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034063054,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034064012,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034064013,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034064014,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034064014,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034064237,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034064237,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034064238,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034064240,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034064420,"pid":16900,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034064421,"pid":16900,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034064422,"pid":16900,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034064422,"pid":16900,"hostname":"Michael","status":304,"msg":"res"}
+
+=== Launch 2025-09-16 16:54:07 PORT=3004 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3004
+{"level":30,"time":1758034449180,"pid":14756,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758034449183,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034449974,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034449981,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034450097,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034450100,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034450190,"pid":14756,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034450191,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034450247,"pid":14756,"hostname":"Michael","method":"GET","path":"/favicon.ico","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034450254,"pid":14756,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758034450273,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034450275,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034450276,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034450278,"pid":14756,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034452534,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034452536,"pid":14756,"hostname":"Michael","status":500,"msg":"res"}
+{"level":30,"time":1758034453829,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034453831,"pid":14756,"hostname":"Michael","status":500,"msg":"res"}
+{"level":30,"time":1758034474231,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034474232,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034476406,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034476407,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034477444,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034477445,"pid":14756,"hostname":"Michael","status":500,"msg":"res"}
+{"level":30,"time":1758034478157,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034478158,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034478525,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034478525,"pid":14756,"hostname":"Michael","status":500,"msg":"res"}
+{"level":30,"time":1758034478893,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034478893,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034480981,"pid":14756,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034480981,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034480982,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034480983,"pid":14756,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034481613,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034481614,"pid":14756,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034482349,"pid":14756,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034482349,"pid":14756,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034482350,"pid":14756,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034482352,"pid":14756,"hostname":"Michael","status":304,"msg":"res"}
+
+=== Launch 2025-09-16 16:57:07 PORT=3005 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3005
+{"level":30,"time":1758034627577,"pid":17908,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758034627581,"pid":17908,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034628344,"pid":17908,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034628354,"pid":17908,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034628429,"pid":17908,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034628432,"pid":17908,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034628496,"pid":17908,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034628497,"pid":17908,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034628526,"pid":17908,"hostname":"Michael","method":"GET","path":"/favicon.ico","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034628530,"pid":17908,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758034628587,"pid":17908,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034628590,"pid":17908,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034628592,"pid":17908,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034628593,"pid":17908,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034630405,"pid":17908,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034630406,"pid":17908,"hostname":"Michael","status":500,"msg":"res"}
+{"level":30,"time":1758034631277,"pid":17908,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034631279,"pid":17908,"hostname":"Michael","status":500,"msg":"res"}
+{"level":30,"time":1758034631445,"pid":17908,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034631446,"pid":17908,"hostname":"Michael","status":500,"msg":"res"}
+
+=== Launch 2025-09-16 17:01:09 PORT=3001 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3001
+{"level":30,"time":1758034869818,"pid":13764,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758034869822,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034870538,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034870550,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034870638,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034870643,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034870727,"pid":13764,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034870727,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034870817,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034870820,"pid":13764,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034870822,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034870823,"pid":13764,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034873308,"pid":13764,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034873309,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034873310,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034873311,"pid":13764,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758034874293,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034888503,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034911159,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034911160,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034913685,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034913686,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758034915405,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758034929082,"pid":13764,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035024334,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035024335,"pid":13764,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035029037,"pid":13764,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035042629,"pid":13764,"hostname":"Michael","status":304,"msg":"res"}
+
+=== Launch 2025-09-16 17:05:52 PORT=3002 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3002
+{"level":30,"time":1758035153698,"pid":18448,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758035153702,"pid":18448,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035154421,"pid":18448,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035154426,"pid":18448,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035154512,"pid":18448,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035154516,"pid":18448,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035154565,"pid":18448,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035154565,"pid":18448,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035154649,"pid":18448,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035154653,"pid":18448,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035154654,"pid":18448,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035154656,"pid":18448,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035156972,"pid":18448,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035171479,"pid":18448,"hostname":"Michael","status":200,"msg":"res"}
+
+=== Launch 2025-09-16 17:16:24 PORT=3003 ===
+[ENV] DATABASE_URL set? false
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+[DB] using in-memory store
+AuraSync backend listening on 3003
+{"level":30,"time":1758035785151,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::ffff:127.0.0.1","email":"","msg":"req"}
+{"level":30,"time":1758035785155,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035785860,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035785865,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035785928,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/admin.css","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035785930,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035785934,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035785935,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035785982,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035785983,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035785983,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035786065,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035786067,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035786068,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035786069,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035786414,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035791096,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035791098,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035792086,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035804999,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035805002,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035809606,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035809608,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035812780,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035812781,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035813341,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035813342,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035817957,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035817958,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035823478,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035832422,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035832423,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035837736,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035845504,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035945853,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035945854,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035947364,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035947365,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035948317,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035948318,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035952708,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035952709,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035952884,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035952885,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035954132,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035954132,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758035954133,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035954137,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758035954138,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758035954479,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037509046,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037509047,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037509110,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/admin.css","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037509111,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037509111,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037509114,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037509176,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037509177,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037509177,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037509260,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037509261,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037509262,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037509262,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037509521,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037511774,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037511775,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037512686,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037526068,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037526069,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037531766,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customer","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037531767,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758037534340,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037534510,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037534682,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037539323,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037541509,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customer","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037541511,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758037547534,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037547758,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037547870,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037568920,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customer","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037568921,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758037574102,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037577261,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037577262,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037578741,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037578742,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037581846,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037581847,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037587409,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037587411,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037591381,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customer","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037591382,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758037593957,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-extensions","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037593958,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758037600396,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037600397,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037607239,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customer","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037607240,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758037608645,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758037608646,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758037613619,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038534152,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038534154,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038534189,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/admin.css","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038534191,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038534197,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038534200,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038534217,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038534217,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038534218,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038534302,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038534303,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038534304,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038534304,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038534561,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038584747,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038584748,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038584832,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/admin.css","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038584832,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038584834,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038584836,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038584887,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038584887,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038584888,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038584974,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038584975,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038585009,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038585010,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038585157,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038589798,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038589799,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038589866,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/admin.css","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038589867,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038589868,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038589868,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038589920,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038589921,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038589921,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038590009,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038590010,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038590011,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038590011,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038590212,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038593726,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038593726,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038593727,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038593729,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038593729,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038593993,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038594621,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/active-users","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038594622,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038596765,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038597725,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038597725,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038597726,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038597729,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038597730,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038598068,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038609834,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038609836,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/stripe-customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038613695,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customer","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038613696,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758038613701,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customer/slotmanchiel%40gmail.com","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038613701,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758038619165,"pid":2528,"hostname":"Michael","method":"GET","path":"/health","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038619166,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038619167,"pid":2528,"hostname":"Michael","method":"GET","path":"/debug/stripe","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038619168,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/customers","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038619169,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038619440,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038622737,"pid":2528,"hostname":"Michael","status":304,"msg":"res"}
+{"level":30,"time":1758038953210,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin/","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038953212,"pid":2528,"hostname":"Michael","status":200,"msg":"res"}
+{"level":30,"time":1758038953290,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin-assets/admin.css","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038953291,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+{"level":30,"time":1758038953292,"pid":2528,"hostname":"Michael","method":"GET","path":"/admin-assets/app.js","ip":"::1","email":"","msg":"req"}
+{"level":30,"time":1758038953293,"pid":2528,"hostname":"Michael","status":404,"msg":"res"}
+certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+[DB] init failed (attempt 3/3) SELF_SIGNED_CERT_IN_CHAIN
+{"level":50,"time":1758038548981,"pid":13296,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+Failed to initialize storage: Error: self-signed certificate in certificate chain
+    at D:\v2 youtube app\py_apps\aurachat-site\backend\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async run (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:215:9)
+    at async initStorage (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:224:5)
+    at async start (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:1744:11) {
+  code: 'SELF_SIGNED_CERT_IN_CHAIN'
+}
+
+=== Launch 2025-09-16 18:02:42 PORT=3004 ===
+[ENV] DATABASE_URL set? true
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+CA file not found at D:\v2 youtube app\py_apps\aurachat-site\backend\certs\db-ca.pem, falling back to system trust store
+[DB] using pg with SSL
+{"level":50,"time":1758038563663,"pid":6848,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1734:7)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+[DB] init failed (attempt 1/3) SELF_SIGNED_CERT_IN_CHAIN
+{"level":50,"time":1758038566023,"pid":6848,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+[DB] init failed (attempt 2/3) SELF_SIGNED_CERT_IN_CHAIN
+{"level":50,"time":1758038568375,"pid":6848,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+[DB] init failed (attempt 3/3) SELF_SIGNED_CERT_IN_CHAIN
+{"level":50,"time":1758038570727,"pid":6848,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+Failed to initialize storage: Error: self-signed certificate in certificate chain
+    at D:\v2 youtube app\py_apps\aurachat-site\backend\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async run (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:215:9)
+    at async initStorage (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:224:5)
+    at async start (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:1744:11) {
+  code: 'SELF_SIGNED_CERT_IN_CHAIN'
+}
+
+=== Launch 2025-09-16 18:08:51 PORT=3004 ===
+[ENV] DATABASE_URL set? true
+[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS
+[DEV] master code enabled? false
+CA file not found at D:\v2 youtube app\py_apps\aurachat-site\backend\certs\db-ca.pem, falling back to system trust store
+[DB] using pg with SSL
+{"level":50,"time":1758038931981,"pid":19280,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1734:7)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+[DB] init failed (attempt 1/3) SELF_SIGNED_CERT_IN_CHAIN
+{"level":50,"time":1758038934335,"pid":19280,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+[DB] init failed (attempt 2/3) SELF_SIGNED_CERT_IN_CHAIN
+{"level":50,"time":1758038936684,"pid":19280,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+[DB] init failed (attempt 3/3) SELF_SIGNED_CERT_IN_CHAIN
+{"level":50,"time":1758038939050,"pid":19280,"hostname":"Michael","err":{"type":"Error","message":"self-signed certificate in certificate chain","stack":"Error: self-signed certificate in certificate chain\n    at D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async run (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:215:9)\n    at async initStorage (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:224:5)\n    at async start (D:\\v2 youtube app\\py_apps\\aurachat-site\\backend\\server.js:1744:11)","code":"SELF_SIGNED_CERT_IN_CHAIN"},"sql":"\n      CREATE TABLE IF NOT EXISTS public.codes (\n        id SERIAL PRIMARY KEY,\n        code TEXT UNIQUE,\n        redeemed BOOLEAN NOT NULL DEFAULT FALSE,\n        note TEXT,\n        created_at BIGINT NOT NULL,\n        redeemed_at BIGINT,\n        origin TEXT,\n        code_hash TEXT,\n        status TEXT DEFAULT 'active',\n        expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),\n        revoked_at TIMESTAMPTZ\n      )","msg":"[DB] bootstrap failed: create codes table"}
+Failed to initialize storage: Error: self-signed certificate in certificate chain
+    at D:\v2 youtube app\py_apps\aurachat-site\backend\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async run (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:215:9)
+    at async initStorage (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:224:5)
+    at async start (D:\v2 youtube app\py_apps\aurachat-site\backend\server.js:1744:11) {
+  code: 'SELF_SIGNED_CERT_IN_CHAIN'
+}

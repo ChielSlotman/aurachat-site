@@ -65,8 +65,27 @@ def node_version_ok():
     except Exception:
         return (False, None)
 
-def start_backend(port, secret):
+def load_env_file(path):
+    data = {}
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                s = line.strip()
+                if not s or s.startswith('#'):
+                    continue
+                if '=' in s:
+                    k, v = s.split('=', 1)
+                    data[k.strip()] = v.strip()
+    except Exception:
+        pass
+    return data
+
+def start_backend(port, secret, loaded_env):
     env = os.environ.copy()
+    # Apply env from .env file first so Node sees the same config
+    for k, v in (loaded_env or {}).items():
+        env[k] = v
+    # Ensure PORT and ADMIN_SECRET are set for the child process
     env['PORT'] = str(port)
     env['ADMIN_SECRET'] = secret
     # Keep window hidden
@@ -111,9 +130,12 @@ def main():
             messagebox.showerror('AuraSync', 'Dependency install failed. Please open a terminal and run "npm install" in the backend folder, then try again.')
             return
 
+    # Load .env so launcher and Node share the same config
+    loaded_env = load_env_file(os.path.join(ROOT, '.env'))
     port = find_port()
-    secret = os.environ.get('ADMIN_SECRET') or rand_hex(24)
-    proc = start_backend(port, secret)
+    # Prefer ADMIN_SECRET from .env, else existing env, else default to requested value
+    secret = (loaded_env.get('ADMIN_SECRET') or os.environ.get('ADMIN_SECRET') or 'mick-aurasync')
+    proc = start_backend(port, secret, loaded_env)
     ok = wait_health(port, timeout=25)
     if not ok:
         try:
@@ -151,6 +173,9 @@ def main():
     btn_row = tk.Frame(root)
     btn_row.pack(pady=6)
     tk.Button(btn_row, text='Open Admin', width=14, command=open_admin).pack(side=tk.LEFT, padx=6)
+    def open_active():
+        url = f'http://localhost:{port}/admin/?sec={secret}&view=active'
+        webbrowser.open(url, new=1)
     def open_logs():
         try:
             os.startfile(LOG_FILE)
@@ -162,6 +187,7 @@ def main():
         except Exception:
             pass
         root.destroy()
+    tk.Button(btn_row, text='Open Active View', width=16, command=open_active).pack(side=tk.LEFT, padx=6)
     tk.Button(btn_row, text='Quit', width=10, command=do_quit).pack(side=tk.LEFT, padx=6)
     tk.Button(btn_row, text='Open Logs', width=12, command=open_logs).pack(side=tk.LEFT, padx=6)
 

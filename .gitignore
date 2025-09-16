@@ -1,0 +1,32 @@
+# Global ignores for this repo
+# OS
+.DS_Store
+Thumbs.db
+
+# Node/JS
+node_modules/
+.npmrc
+package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+backend/backend.log
+backend.log
+
+# Environment & secrets
+.env
+.env.*
+backend/.env
+
+# Build output
+/dist/
+/build/
+/.cache/
+
+# Editor
+.vscode/
+.idea/

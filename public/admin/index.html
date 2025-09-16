@@ -1,43 +1,62 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>AuraSync Admin</title>
-<style>
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; max-width: 1100px; margin: 24px auto; }
-  h1 { margin: 0 0 16px; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
-  input, select, button { padding: 8px; }
-  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-  th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
-  tr:hover { background: #fafafa; }
-  code { background: #f2f2f2; padding: 2px 4px; border-radius: 4px; }
-</style>
-
-<h1>AuraSync Admin</h1>
-
-<div class="row">
-  <label>Admin Secret
-    <input id="sec" type="password" placeholder="paste ADMIN_SECRET">
-  </label>
-</div>
-
-<div class="row">
-  <input id="q" placeholder="search email">
-  <button id="btnSearch">Search</button>
-  <button id="btnRefresh" title="Reload list">Refresh</button>
-  <small id="status" style="margin-left:8px;color:#666"></small>
-  
-</div>
-
-<div class="row">
-  <input id="newEmail" placeholder="grant to email">
-  <select id="plan">
-    <option value="premium">premium</option>
-    <option value="monthly">monthly</option>
-    <option value="yearly">yearly</option>
-    <option value="lifetime">lifetime</option>
-  </select>
-  <button id="btnGrant">Grant License</button>
-</div>
-
-<div id="out"></div>
-<script src="/admin/app.js" defer></script>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AuraSync Admin</title>
+  <link rel="stylesheet" href="/admin-assets/admin.css">
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand"><div class="logo"></div><div>AuraSync Admin</div></div>
+        <div class="nav">
+          <button id="btnCustomers" class="active" title="Customers view">Customers</button>
+          <button id="btnActive" title="Show recently active premium users">Active Premium</button>
+          <button id="btnStripe" title="List Stripe customers">Stripe Customers</button>
+          <button id="btnAgents" title="Summarize active extensions/agents">Active Extensions</button>
+        </div>
+        <div style="margin-top:16px">
+          <label class="muted" style="display:block;margin-bottom:6px;font-size:12px">Admin Secret</label>
+          <input id="sec" type="password" placeholder="paste ADMIN_SECRET" style="width:100%">
+        </div>
+      </aside>
+      <main class="main">
+        <div class="header">
+          <div class="title">Dashboard</div>
+          <div class="statusbar">
+            <span class="pill" id="dbinfo">db: …</span>
+            <span class="pill" id="stripeinfo">stripe: …</span>
+            <span class="pill" id="status"></span>
+          </div>
+        </div>
+        <div class="toolbar">
+          <input id="q" placeholder="search email">
+          <button id="btnSearch">Search</button>
+          <button id="btnRefresh" title="Reload list">Refresh</button>
+          <label class="muted">Hours <input id="hours" type="number" value="24" min="1" style="width:80px" title="Window in hours"></label>
+        </div>
+        <div class="cards">
+          <div class="card">
+            <h3>Customers</h3>
+            <div id="out"></div>
+          </div>
+          <div class="card half">
+            <h3>Grant License</h3>
+            <div class="toolbar">
+              <input id="newEmail" placeholder="grant to email">
+              <select id="plan">
+                <option value="premium">premium</option>
+                <option value="monthly">monthly</option>
+                <option value="yearly">yearly</option>
+                <option value="lifetime">lifetime</option>
+              </select>
+              <button id="btnGrant">Grant License</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  <script src="/admin-assets/app.js" defer></script>
+  </body>
+  </html>

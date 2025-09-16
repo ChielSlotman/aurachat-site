@@ -249,6 +249,11 @@ async function initStorage() {
         code_id INTEGER REFERENCES public.codes(id) ON DELETE SET NULL,
         email TEXT
       )`, 'create tokens table');
+    // Usage tracking columns for active users feature
+    await run(`ALTER TABLE public.tokens ADD COLUMN IF NOT EXISTS last_seen_at BIGINT`, 'alter tokens add last_seen_at');
+    await run(`ALTER TABLE public.tokens ADD COLUMN IF NOT EXISTS last_premium BOOLEAN`, 'alter tokens add last_premium');
+    await run(`ALTER TABLE public.tokens ADD COLUMN IF NOT EXISTS last_origin TEXT`, 'alter tokens add last_origin');
+    await run(`ALTER TABLE public.tokens ADD COLUMN IF NOT EXISTS last_agent TEXT`, 'alter tokens add last_agent');
 
     await run(`
       CREATE TABLE IF NOT EXISTS public.redemptions (
@@ -488,7 +493,7 @@ async function dbRedeem(codeStr, origin, email) {
     if (c.expires_at && c.expires_at < Date.now()) return { error: 'expired_code' };
     c.redeemed = true; c.redeemed_at = nowMs; c.origin = origin || ''; try { c.code = null; } catch {}
     const tokenId = mem.nextId.token++;
-    mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id, email: (email || '').toLowerCase() });
+  mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id, email: (email || '').toLowerCase(), last_seen_at: null, last_premium: null, last_origin: null, last_agent: null });
     const redId = mem.nextId.redemption++;
     mem.redemptions.push({ id: redId, code_id: c.id, token_id: tokenId, origin: origin || '', created_at: nowMs });
     return { token, premium: true };
@@ -914,9 +919,11 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
 // After webhook: global parsers for JSON and urlencoded
 app.use(express.json());
 
-// Serve static files (admin UI lives in ../public/admin/index.html)
+// Serve static files for main site
 app.use(express.static(path.join(__dirname, '../public')));
-// Ensure /admin/ directory path resolves to index.html explicitly
+// Serve admin static assets under /admin-assets to avoid /admin/* API collision
+app.use('/admin-assets', express.static(path.join(__dirname, '../public/admin')));
+// Ensure /admin and /admin/ route to index.html (SPA entry)
 app.get(['/admin', '/admin/'], (req, res) => {
   res.sendFile(path.join(__dirname, '../public/admin/index.html'));
 });
@@ -1178,6 +1185,15 @@ app.get('/status', async (req, res) => {
     const nowMs = now();
     const valid = Boolean(record && !record.revoked && (record.expires_at || record.expiresAt) && (record.expires_at || record.expiresAt) > nowMs);
     const premium = Boolean(valid && record.premium !== false);
+    // Record usage
+    try {
+      const origin = req.headers.origin || '';
+      const agent = req.headers['user-agent'] || '';
+      if (pool) await pool.query('UPDATE tokens SET last_seen_at=$1, last_premium=$2, last_origin=$3, last_agent=$4 WHERE token=$5', [nowMs, premium, origin, agent, token]);
+      else if (record) { record.last_seen_at = nowMs; record.last_premium = premium; record.last_origin = origin; record.last_agent = agent; }
+    } catch (e) {
+      console.warn('status: failed to write usage', e?.message || e);
+    }
     res.json({ valid, premium });
   } catch (err) {
     console.error('Status error:', err);
@@ -1449,6 +1465,112 @@ app.get('/admin/customers', async (req, res) => {
   }
 });
 
+// --- Admin: single customer detail (full codes/tokens) ---
+// GET /admin/customer?email=foo@example.com
+app.get('/admin/customer', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const email = normalizeEmail(String(req.query?.email || ''));
+  if (!email) return res.status(400).json({ error: 'missing_email' });
+  try{
+    if (pool) {
+      const { rows: lic } = await pool.query('SELECT email, plan, active, activated_at FROM licenses WHERE LOWER(email)=$1', [email]);
+      const license = lic[0] || null;
+      const { rows: codes } = await pool.query('SELECT id, code, code_hash, status, redeemed, created_at, redeemed_at, expires_at FROM codes WHERE note=$1 ORDER BY created_at DESC', [email]);
+      const { rows: tokens } = await pool.query('SELECT token, revoked, premium, created_at, expires_at, last_seen_at, last_origin, last_agent FROM tokens WHERE email=$1 ORDER BY created_at DESC', [email]);
+      return res.json({ email, license, codes, tokens });
+    } else {
+      const license = mem.licenses.get(email) || null;
+      const codes = [...mem.codes.values()].filter(c=>normalizeEmail(c.note||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+      const tokens = [...mem.tokens.values()].filter(t=>normalizeEmail(t.email||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+      return res.json({ email, license, codes, tokens });
+    }
+  }catch(e){
+    console.error('/admin/customer error', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// --- Admin: Stripe customers with subscriptions and latest code/token details ---
+// GET /admin/stripe-customers?limit=100
+app.get('/admin/stripe-customers', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
+  try {
+    const limit = Math.max(1, Math.min(Number(req.query.limit || 100), 200));
+    const map = new Map(); // key: email or customer id if email missing
+    const customers = await stripe.customers.list({ limit });
+    // helper to rank subscription states
+    const rank = (s)=>{
+      switch(String(s||'inactive')){
+        case 'active': return 5;
+        case 'trialing': return 4;
+        case 'past_due': return 3;
+        case 'unpaid': return 2;
+        case 'canceled': return 1;
+        default: return 0;
+      }
+    };
+    for (const c of customers.data) {
+      const email = normalizeEmail(c.email || '');
+      const key = email || `cust_${c.id}`;
+      // Fetch best subscription
+      let plan = null, status = 'inactive', current_period_end = null, priceId = null;
+      try {
+        const subs = await stripe.subscriptions.list({ customer: c.id, limit: 10, status: 'all' });
+        // pick the highest-ranked subscription
+        let best = null; let bestRank = -1;
+        for (const s of subs.data) {
+          const r = rank(s.status);
+          if (r > bestRank) { best = s; bestRank = r; }
+        }
+        if (best) {
+          status = best.status;
+          current_period_end = (best.current_period_end ? best.current_period_end * 1000 : null);
+          priceId = best.items?.data?.[0]?.price?.id;
+          plan = PRICE_TO_PLAN[priceId] || best.items?.data?.[0]?.price?.nickname || null;
+        }
+      } catch {}
+
+      // Pull codes and tokens (up to 5 for quick view)
+      let codes = [], tokens = [], tokenCount = 0, lastSeen = null;
+      if (email) {
+        if (pool) {
+          const { rows: codesRows } = await pool.query('SELECT id, created_at, status, expires_at, code FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 5', [email]);
+          codes = codesRows.map(crow=>({ id: crow.id, created_at: Number(crow.created_at), status: crow.status ?? null, expires_at: crow.expires_at ? Number(new Date(crow.expires_at).getTime()) : null, code: crow.code || null, code_tail: crow.code ? crow.code.slice(-6) : null }));
+          const { rows: toksRows } = await pool.query('SELECT token, revoked, created_at, expires_at, last_seen_at FROM tokens WHERE email=$1 ORDER BY created_at DESC LIMIT 5', [email]);
+          tokens = toksRows.map(t=>({ token_tail: (t.token||'').slice(-8), token: t.token, revoked: !!t.revoked, created_at: Number(t.created_at), expires_at: Number(t.expires_at), last_seen_at: t.last_seen_at ? Number(t.last_seen_at) : null }));
+          const { rows: agg } = await pool.query('SELECT COUNT(*)::int AS cnt, MAX(last_seen_at) AS last_seen FROM tokens WHERE email=$1', [email]);
+          tokenCount = (agg?.[0]?.cnt) || 0;
+          lastSeen = agg?.[0]?.last_seen ? Number(agg[0].last_seen) : null;
+        } else {
+          const allCodes = [...mem.codes.values()].filter(x=>normalizeEmail(x.note||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+          codes = allCodes.slice(0,5).map(crow=>({ id: crow.id, created_at: Number(crow.created_at), status: crow.status ?? (crow.redeemed ? 'used':'active'), expires_at: crow.expires_at || null, code: crow.code || null, code_tail: (crow.code||'').slice(-6) }));
+          const toks = [...mem.tokens.values()].filter(t=>normalizeEmail(t.email||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+          tokens = toks.slice(0,5).map(t=>({ token_tail: (t.token||'').slice(-8), token: t.token, revoked: !!t.revoked, created_at: Number(t.created_at), expires_at: Number(t.expires_at), last_seen_at: t.last_seen_at || null }));
+          tokenCount = toks.length;
+          lastSeen = toks.reduce((m,t)=>Math.max(m, t.last_seen_at||0), 0) || null;
+        }
+      }
+
+      const next = { email, plan, status, current_period_end, price_id: priceId, codes, tokens, tokens_total: tokenCount, last_seen_at: lastSeen };
+      const prev = map.get(key);
+      if (!prev || rank(next.status) > rank(prev.status)) {
+        map.set(key, next);
+      }
+    }
+    const out = [...map.values()].sort((a,b)=>{
+      // Sort active first, then by email
+      const d = rank(b.status) - rank(a.status);
+      if (d !== 0) return d;
+      return (a.email||'').localeCompare(b.email||'');
+    });
+    res.json({ customers: out });
+  } catch (e) {
+    console.error('admin/stripe-customers error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // --- Admin: grant license and issue a new code ---
 // POST /admin/grant-license { email, plan }
 app.post('/admin/grant-license', async (req, res) => {
@@ -1487,6 +1609,90 @@ app.post('/admin/revoke-email', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('admin/revoke-email error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Admin: list active premium users within window (hours)
+// GET /admin/active-users?hours=24
+app.get('/admin/active-users', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  try {
+    const hours = Math.max(1, Math.min(Number(req.query.hours || 24), 720));
+    const since = Date.now() - hours * 60 * 60 * 1000;
+    const out = [];
+    if (pool) {
+      const q = `
+        SELECT LOWER(COALESCE(t.email, c.note)) AS email,
+               MAX(t.last_seen_at) AS last_seen_at,
+               COUNT(*) FILTER (WHERE t.last_premium = TRUE) AS premium_hits,
+               COUNT(*) AS tokens,
+               ARRAY_AGG(RIGHT(t.token, 6) ORDER BY t.last_seen_at DESC) AS token_tails
+        FROM tokens t
+        LEFT JOIN codes c ON c.id = t.code_id
+        WHERE t.last_seen_at IS NOT NULL AND t.last_seen_at >= $1 AND t.last_premium = TRUE
+        GROUP BY 1
+        ORDER BY MAX(t.last_seen_at) DESC
+        LIMIT 500`;
+      const { rows } = await pool.query(q, [since]);
+      for (const r of rows) {
+        out.push({ email: r.email, last_seen_at: Number(r.last_seen_at), premium_hits: Number(r.premium_hits), tokens: Number(r.tokens), token_tails: r.token_tails || [] });
+      }
+    } else {
+      const map = new Map();
+      for (const [tok, t] of mem.tokens.entries()) {
+        if (!t.last_seen_at || t.last_seen_at < since) continue;
+        if (!t.last_premium) continue;
+        const email = (t.email || (mem.codes.get(tok)?.note) || '').toLowerCase();
+        if (!email) continue;
+        const cur = map.get(email) || { email, last_seen_at: 0, premium_hits: 0, tokens: 0, token_tails: [] };
+        cur.last_seen_at = Math.max(cur.last_seen_at, t.last_seen_at);
+        cur.premium_hits += 1;
+        cur.tokens += 1;
+        cur.token_tails.push(tok.slice(-6));
+        map.set(email, cur);
+      }
+      out.push(...[...map.values()].sort((a,b)=>b.last_seen_at-a.last_seen_at));
+    }
+    res.json({ since, hours, users: out });
+  } catch (e) {
+    console.error('/admin/active-users error', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Admin: summarize active extensions/agents within window (hours)
+// GET /admin/active-extensions?hours=24
+app.get('/admin/active-extensions', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  try {
+    const hours = Math.max(1, Math.min(Number(req.query.hours || 24), 720));
+    const since = Date.now() - hours * 60 * 60 * 1000;
+    if (pool) {
+      const q = `
+        SELECT COALESCE(NULLIF(t.last_origin, ''), 'unknown') AS origin,
+               COALESCE(NULLIF(t.last_agent, ''), 'unknown') AS agent,
+               COUNT(*) FILTER (WHERE t.last_premium = TRUE AND t.last_seen_at >= $1) AS hits
+        FROM tokens t
+        WHERE t.last_seen_at IS NOT NULL AND t.last_seen_at >= $1 AND t.last_premium = TRUE
+        GROUP BY 1,2
+        ORDER BY hits DESC
+        LIMIT 200`;
+      const { rows } = await pool.query(q, [since]);
+      return res.json({ since, hours, agents: rows.map(r=>({ origin: r.origin, agent: r.agent, hits: Number(r.hits) })) });
+    } else {
+      const map = new Map();
+      for (const [, t] of mem.tokens.entries()) {
+        if (!t.last_seen_at || t.last_seen_at < since) continue;
+        if (!t.last_premium) continue;
+        const key = `${t.last_origin||'unknown'}|${t.last_agent||'unknown'}`;
+        map.set(key, (map.get(key)||0)+1);
+      }
+      const agents = [...map.entries()].map(([k,v])=>{ const [o,a]=k.split('|'); return { origin:o, agent:a, hits:v }; }).sort((a,b)=>b.hits-a.hits).slice(0,200);
+      return res.json({ since, hours, agents });
+    }
+  } catch (e) {
+    console.error('/admin/active-extensions error', e);
     res.status(500).json({ error: 'server_error' });
   }
 });

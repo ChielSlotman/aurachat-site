@@ -617,6 +617,28 @@ async function hasActiveSubscription(email) {
   return false;
 }
 
+// Stripe-only premium check (active OR trialing). Returns boolean.
+async function hasActiveOrTrialingStripe(email) {
+  const norm = normalizeEmail(email);
+  if (!norm || !stripe) return false;
+  try {
+    // A user may have multiple customers with same email; scan a reasonable set
+    const customers = await stripe.customers.list({ email: norm, limit: 100 });
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const c of customers.data) {
+      const subs = await stripe.subscriptions.list({ customer: c.id, status: 'all', limit: 100 });
+      for (const s of subs.data) {
+        const st = String(s.status || '').toLowerCase();
+        if (st === 'active' || st === 'trialing') {
+          // Consider premium if current period hasn't ended yet
+          if (!s.current_period_end || s.current_period_end > nowSec) return true;
+        }
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
 // Helper: find a code row by matching plaintext or verifying code_hash
 async function dbFindCodeByPlainOrHash(codeStr) {
   if (!codeStr) return null;
@@ -1172,32 +1194,36 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
   }
 });
 
-// GET /status?token=...
+// GET /status?token=...  (treat token as email for now)
+// Always returns JSON { premium: boolean, email: string }
 app.get('/status', async (req, res) => {
   try {
-    const token = String(req.query.token || '').trim();
-    if (!token) return res.status(400).json({ error: 'Missing token' });
-    // Developer dev- tokens: always premium
-    if (typeof token === 'string' && token.startsWith('dev-')) {
-      return res.json({ premium: true, dev: true });
-    }
-    const record = await dbGetToken(token);
-    const nowMs = now();
-    const valid = Boolean(record && !record.revoked && (record.expires_at || record.expiresAt) && (record.expires_at || record.expiresAt) > nowMs);
-    const premium = Boolean(valid && record.premium !== false);
-    // Record usage
-    try {
-      const origin = req.headers.origin || '';
-      const agent = req.headers['user-agent'] || '';
-      if (pool) await pool.query('UPDATE tokens SET last_seen_at=$1, last_premium=$2, last_origin=$3, last_agent=$4 WHERE token=$5', [nowMs, premium, origin, agent, token]);
-      else if (record) { record.last_seen_at = nowMs; record.last_premium = premium; record.last_origin = origin; record.last_agent = agent; }
-    } catch (e) {
-      console.warn('status: failed to write usage', e?.message || e);
-    }
-    res.json({ valid, premium });
+    const raw = String(req.query.token || '').trim();
+    const email = normalizeEmail(raw);
+    // If no email-like token provided, return false but keep shape
+    if (!email || !email.includes('@')) return res.json({ premium: false, email: '' });
+
+    // Stripe-based premium check (active or trialing)
+    const premium = await hasActiveOrTrialingStripe(email);
+    return res.json({ premium: !!premium, email });
   } catch (err) {
+    // On error, maintain shape and be conservative
     console.error('Status error:', err);
-    res.status(500).json({ error: 'Server error' });
+    return res.json({ premium: false, email: '' });
+  }
+});
+
+// GET /status-by-email?email=...
+// Returns JSON { premium: boolean }
+app.get('/status-by-email', async (req, res) => {
+  try {
+    const email = normalizeEmail(String(req.query.email || ''));
+    if (!email || !email.includes('@')) return res.json({ premium: false });
+    const premium = await hasActiveOrTrialingStripe(email);
+    return res.json({ premium: !!premium });
+  } catch (e) {
+    console.error('status-by-email error:', e);
+    return res.json({ premium: false });
   }
 });
 

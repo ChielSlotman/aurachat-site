@@ -9,8 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "stripe:check": "node scripts/stripe-status-check.js"
+    "dev": "node server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

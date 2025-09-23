@@ -740,10 +740,21 @@ async function getStripeStatusByEmailDetailed(email) {
     for (const s of list) {
       const st = String(s.status || '').toLowerCase();
       const rank = statusRank(st);
-      const item = s.items?.data?.[0];
-      const priceId = item?.price?.id || null;
-      const productId = item?.price?.product?.id || (typeof item?.price?.product === 'string' ? item.price.product : null);
-      const allow = isAllowlisted({ priceId, productId });
+      const items = s.items?.data || [];
+      // Determine if any item qualifies per allowlist; pick the first qualifying item for reporting
+      let chosenItem = null;
+      let allow = false;
+      for (const it of items) {
+        const pId = it?.price?.id || null;
+        const prId = it?.price?.product?.id || (typeof it?.price?.product === 'string' ? it.price.product : null);
+        const ok = isAllowlisted({ priceId: pId, productId: prId });
+        if (ok && !chosenItem) { chosenItem = it; }
+        if (ok) allow = true;
+      }
+      // If nothing matched allowlist but there were items, pick first for reporting (when allowlists are empty this branch won't happen)
+      if (!chosenItem && items.length) chosenItem = items[0];
+      const priceId = chosenItem?.price?.id || null;
+      const productId = chosenItem?.price?.product?.id || (typeof chosenItem?.price?.product === 'string' ? chosenItem.price.product : null);
       const cpe = s.current_period_end || null;
       const isWithinPeriod = (cpe == null) ? true : cpe > nowSec;
       const cape = !!s.cancel_at_period_end;
@@ -1342,8 +1353,10 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
 // Always returns JSON { premium: boolean, email: string }
 app.get('/status', async (req, res) => {
   try {
-    const raw = String(req.query.token || '').trim();
+    // Back-compat: support both token and email query params
+    const raw = String((req.query.email ?? req.query.token) || '').trim();
     const email = normalizeEmail(raw);
+    res.setHeader('Cache-Control', 'no-store');
     // If no email-like token provided, return false but keep shape
     if (!email || !email.includes('@')) return res.json({ premium: false, email: '' });
 
@@ -1353,6 +1366,7 @@ app.get('/status', async (req, res) => {
   } catch (err) {
     // On error, maintain shape and be conservative
     console.error('Status error:', err);
+    res.setHeader('Cache-Control', 'no-store');
     return res.json({ premium: false, email: '' });
   }
 });
@@ -1383,6 +1397,13 @@ app.get('/status-by-email', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     return res.json({ premium: false, email: '', source: 'stripe', subscription: null });
   }
+});
+
+// Back-compat alias: /status/email?email=...
+app.get('/status/email', async (req, res) => {
+  // Delegate to the same logic used by /status-by-email
+  req.url = '/status-by-email' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+  return app._router.handle(req, res, () => {});
 });
 
 // --- Regenerate code for a customer (admin protected) ---

@@ -10,6 +10,12 @@ function normalizeEmail(email) {
   }
   return e;
 }
+// Stripe prefers the exact stored email; do NOT collapse Gmail dots/plus.
+// Use this when querying Stripe, and optionally try the DB-normalized variant as a fallback.
+function emailForStripe(email) {
+  if (!email) return '';
+  return String(email).trim().toLowerCase();
+}
 // Minimal AuraSync backend: redeem codes and check premium status
 const express = require('express');
 const helmet = require('helmet');
@@ -591,11 +597,16 @@ async function dbGetCodeByToken(tokenStr) {
 
 // Subscription helpers
 async function hasActiveSubscription(email) {
+  const raw = emailForStripe(email);
   const norm = normalizeEmail(email);
-  // 1) Stripe direct check
+  // 1) Stripe direct check (use raw first to respect exact Stripe email)
   if (stripe) {
     try {
-      const customers = await stripe.customers.list({ email: norm, limit: 1 });
+      let customers = await stripe.customers.list({ email: raw, limit: 1 });
+      // Fallback: try normalized if raw yielded nothing (helps legacy rows)
+      if (!customers?.data?.length && norm && norm !== raw) {
+        customers = await stripe.customers.list({ email: norm, limit: 1 });
+      }
       const customerId = customers?.data?.[0]?.id || null;
       if (customerId) {
         const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
@@ -619,21 +630,28 @@ async function hasActiveSubscription(email) {
 
 // Stripe-only premium check (active OR trialing). Returns boolean.
 async function hasActiveOrTrialingStripe(email) {
+  const raw = emailForStripe(email);
   const norm = normalizeEmail(email);
-  if (!norm || !stripe) return false;
+  const searchEmail = raw || norm;
+  if (!searchEmail || !stripe) return false;
   try {
-    // A user may have multiple customers with same email; scan a reasonable set
-    const customers = await stripe.customers.list({ email: norm, limit: 100 });
+    // Try raw first; if empty result and different, try normalized
+    const attempts = [];
+    attempts.push(searchEmail);
+    if (norm && norm !== searchEmail) attempts.push(norm);
     const nowSec = Math.floor(Date.now() / 1000);
-    for (const c of customers.data) {
-      const subs = await stripe.subscriptions.list({ customer: c.id, status: 'all', limit: 100 });
-      for (const s of subs.data) {
-        const st = String(s.status || '').toLowerCase();
-        if (st === 'active' || st === 'trialing') {
-          // Consider premium if current period hasn't ended yet
-          if (!s.current_period_end || s.current_period_end > nowSec) return true;
+    for (const em of attempts) {
+      const customers = await stripe.customers.list({ email: em, limit: 100 });
+      for (const c of customers.data) {
+        const subs = await stripe.subscriptions.list({ customer: c.id, status: 'all', limit: 100 });
+        for (const s of subs.data) {
+          const st = String(s.status || '').toLowerCase();
+          if (st === 'active' || st === 'trialing') {
+            if (!s.current_period_end || s.current_period_end > nowSec) return true;
+          }
         }
       }
+      // If we found nothing for this variant, continue to next
     }
   } catch (_) {}
   return false;
@@ -1198,16 +1216,15 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
 // Always returns JSON { premium: boolean, email: string }
 app.get('/status', async (req, res) => {
   try {
-    const raw = String(req.query.token || '').trim();
-    const email = normalizeEmail(raw);
-    // If no email-like token provided, return false but keep shape
-    if (!email || !email.includes('@')) return res.json({ premium: false, email: '' });
+    // Back-compat: some clients send ?token=<email>; also accept ?email=
+    const rawIn = String((req.query.email ?? req.query.token) || '').trim();
+    const rawEmail = emailForStripe(rawIn);
+    const displayEmail = normalizeEmail(rawIn); // for response shape only
+    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false, email: '' });
 
-    // Stripe-based premium check (active or trialing)
-    const premium = await hasActiveOrTrialingStripe(email);
-    return res.json({ premium: !!premium, email });
+    const premium = await hasActiveOrTrialingStripe(rawEmail);
+    return res.json({ premium: !!premium, email: displayEmail });
   } catch (err) {
-    // On error, maintain shape and be conservative
     console.error('Status error:', err);
     return res.json({ premium: false, email: '' });
   }
@@ -1217,9 +1234,10 @@ app.get('/status', async (req, res) => {
 // Returns JSON { premium: boolean }
 app.get('/status-by-email', async (req, res) => {
   try {
-    const email = normalizeEmail(String(req.query.email || ''));
-    if (!email || !email.includes('@')) return res.json({ premium: false });
-    const premium = await hasActiveOrTrialingStripe(email);
+    const rawIn = String(req.query.email || '');
+    const rawEmail = emailForStripe(rawIn);
+    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false });
+    const premium = await hasActiveOrTrialingStripe(rawEmail);
     return res.json({ premium: !!premium });
   } catch (e) {
     console.error('status-by-email error:', e);

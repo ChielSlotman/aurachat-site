@@ -617,26 +617,170 @@ async function hasActiveSubscription(email) {
   return false;
 }
 
-// Stripe-only premium check (active OR trialing). Returns boolean.
-async function hasActiveOrTrialingStripe(email) {
+// Helper: parse allowlists for price/product
+const PREMIUM_PRICE_IDS = new Set((process.env.PREMIUM_PRICE_IDS || '')
+  .split(',').map(s => s.trim()).filter(Boolean));
+const PREMIUM_PRODUCT_IDS = new Set((process.env.PREMIUM_PRODUCT_IDS || '')
+  .split(',').map(s => s.trim()).filter(Boolean));
+// Merge with existing STRIPE_* allowers
+for (const id of Object.keys(PRICE_TO_PLAN || {})) if (id) PREMIUM_PRICE_IDS.add(id);
+for (const id of (process.env.STRIPE_ALLOWED_PRICE_IDS || '').split(',').map(s=>s.trim()).filter(Boolean)) PREMIUM_PRICE_IDS.add(id);
+
+function stripeMode() {
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (key.startsWith('sk_test_')) return 'test';
+  if (key.startsWith('sk_live_')) return 'live';
+  return 'unknown';
+}
+
+function buildGmailVariants(email) {
+  // Returns array of search query strings for customers.search
+  const e = String(email || '').trim().toLowerCase();
+  const out = [];
+  if (!e) return out;
+  const [user, domain] = e.split('@');
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    const dotless = user.replace(/\./g, '');
+    // exact
+    out.push(`email:'${user}@gmail.com'`);
+    // dotless
+    out.push(`email:'${dotless}@gmail.com'`);
+    // plus alias wildcard
+    out.push(`email:'${user}+*@gmail.com'`);
+  } else {
+    out.push(`email:'${e}'`);
+  }
+  return out;
+}
+
+function statusRank(st) {
+  switch (String(st || '')) {
+    case 'active': return 3;
+    case 'trialing': return 2;
+    case 'past_due': return 1; // not considered premium by default
+    default: return 0;
+  }
+}
+
+function isAllowlisted({ priceId, productId }) {
+  // If no allowlists configured at all, allow everything (non-breaking)
+  const hasAny = PREMIUM_PRICE_IDS.size > 0 || PREMIUM_PRODUCT_IDS.size > 0;
+  if (!hasAny) return true;
+  if (priceId && PREMIUM_PRICE_IDS.has(priceId)) return true;
+  if (productId && PREMIUM_PRODUCT_IDS.has(productId)) return true;
+  return false;
+}
+
+// Detailed Stripe lookup and decision
+async function getStripeStatusByEmailDetailed(email) {
+  const rawLower = String(email || '').trim().toLowerCase();
   const norm = normalizeEmail(email);
-  if (!norm || !stripe) return false;
+  const mode = stripeMode();
+  const debug = {
+    stripeMode: mode,
+    emailCanonical: rawLower,
+    customersFound: 0,
+    chosenCustomerId: null,
+    subsScanned: 0,
+    chosenSub: null,
+    finalPremium: false,
+    notes: []
+  };
+  if (!rawLower || !stripe) return { premium: false, chosen: null, debug };
+  const nowSec = Math.floor(Date.now() / 1000);
+  let customers = [];
+  // Try customers.search with variants; fall back to list
+  const queries = buildGmailVariants(rawLower);
+  let usedSearch = false;
   try {
-    // A user may have multiple customers with same email; scan a reasonable set
-    const customers = await stripe.customers.list({ email: norm, limit: 100 });
-    const nowSec = Math.floor(Date.now() / 1000);
-    for (const c of customers.data) {
-      const subs = await stripe.subscriptions.list({ customer: c.id, status: 'all', limit: 100 });
-      for (const s of subs.data) {
-        const st = String(s.status || '').toLowerCase();
-        if (st === 'active' || st === 'trialing') {
-          // Consider premium if current period hasn't ended yet
-          if (!s.current_period_end || s.current_period_end > nowSec) return true;
+    for (const qstr of queries) {
+      const r = await stripe.customers.search({ query: qstr, limit: 100 });
+      if (Array.isArray(r?.data) && r.data.length) {
+        customers = r.data;
+        usedSearch = true;
+        debug.notes.push(`customers.search hit: ${qstr}`);
+        break;
+      }
+    }
+  } catch (e) {
+    debug.notes.push(`customers.search failed: ${String(e?.message || e)}`);
+  }
+  if (!customers.length) {
+    try {
+      // Fallback exact list lookup(s)
+      const list1 = await stripe.customers.list({ email: rawLower, limit: 100 });
+      customers.push(...(list1?.data || []));
+      const [user, domain] = rawLower.split('@');
+      if ((domain === 'gmail.com' || domain === 'googlemail.com') && user.includes('.')) {
+        const dotless = user.replace(/\./g, '');
+        const list2 = await stripe.customers.list({ email: `${dotless}@gmail.com`, limit: 100 });
+        customers.push(...(list2?.data || []));
+      }
+    } catch (e) {
+      debug.notes.push(`customers.list failed: ${String(e?.message || e)}`);
+    }
+  }
+  // Dedupe customers by id
+  const seen = new Set();
+  customers = customers.filter(c => { if (!c?.id || seen.has(c.id)) return false; seen.add(c.id); return true; });
+  debug.customersFound = customers.length;
+
+  // Scan subscriptions across customers, pick best
+  let best = null; let bestRank = -1; let bestCust = null;
+  for (const c of customers) {
+    let subs;
+    try {
+      subs = await stripe.subscriptions.list({ customer: c.id, status: 'all', limit: 100, expand: ['data.items.data.price.product'] });
+    } catch (e) {
+      debug.notes.push(`subs.list failed for ${c.id}: ${String(e?.message || e)}`);
+      continue;
+    }
+    const list = subs?.data || [];
+    debug.subsScanned += list.length;
+    for (const s of list) {
+      const st = String(s.status || '').toLowerCase();
+      const rank = statusRank(st);
+      const item = s.items?.data?.[0];
+      const priceId = item?.price?.id || null;
+      const productId = item?.price?.product?.id || (typeof item?.price?.product === 'string' ? item.price.product : null);
+      const allow = isAllowlisted({ priceId, productId });
+      const cpe = s.current_period_end || null;
+      const isWithinPeriod = (cpe == null) ? true : cpe > nowSec;
+      const cape = !!s.cancel_at_period_end;
+      // Decide preliminary premium
+      let qualifies = false;
+      if ((st === 'active' || st === 'trialing') && isWithinPeriod) qualifies = true;
+      if (!allow) {
+        qualifies = false;
+      }
+      // We don't count past_due by default
+      if (st === 'past_due') qualifies = false;
+
+      // Choose best by rank, then latest current_period_end
+      if (qualifies) {
+        const currentEnd = cpe || 0;
+        if (rank > bestRank || (rank === bestRank && best && currentEnd > (best.current_period_end || 0))) {
+          best = {
+            id: s.id,
+            status: st,
+            priceId,
+            productId,
+            current_period_end: cpe || null,
+            cancel_at_period_end: cape || false,
+            trial_end: s.trial_end || null
+          };
+          bestRank = rank;
+          bestCust = c.id;
         }
       }
     }
-  } catch (_) {}
-  return false;
+  }
+
+  debug.chosenCustomerId = bestCust;
+  debug.chosenSub = best;
+  const premium = !!best;
+  debug.finalPremium = premium;
+  return { premium, chosen: best, customerId: bestCust, debug };
 }
 
 // Helper: find a code row by matching plaintext or verifying code_hash
@@ -1204,7 +1348,7 @@ app.get('/status', async (req, res) => {
     if (!email || !email.includes('@')) return res.json({ premium: false, email: '' });
 
     // Stripe-based premium check (active or trialing)
-    const premium = await hasActiveOrTrialingStripe(email);
+    const { premium } = await getStripeStatusByEmailDetailed(email);
     return res.json({ premium: !!premium, email });
   } catch (err) {
     // On error, maintain shape and be conservative
@@ -1214,16 +1358,30 @@ app.get('/status', async (req, res) => {
 });
 
 // GET /status-by-email?email=...
-// Returns JSON { premium: boolean }
+// Returns JSON { premium, email, source: 'stripe', subscription: { id, status, priceId, productId, current_period_end, cancel_at_period_end, trial_end } }
 app.get('/status-by-email', async (req, res) => {
   try {
-    const email = normalizeEmail(String(req.query.email || ''));
-    if (!email || !email.includes('@')) return res.json({ premium: false });
-    const premium = await hasActiveOrTrialingStripe(email);
-    return res.json({ premium: !!premium });
+    const raw = String(req.query.email || '');
+    const email = normalizeEmail(raw);
+    res.setHeader('Cache-Control', 'no-store');
+    if (!email || !email.includes('@')) return res.json({ premium: false, email: '', source: 'stripe', subscription: null });
+    const { premium, chosen, customerId, debug } = await getStripeStatusByEmailDetailed(email);
+    // Structured debug log for this request
+    log.info({
+      route: 'status-by-email',
+      stripeMode: debug.stripeMode,
+      emailCanonical: debug.emailCanonical,
+      customersFound: debug.customersFound,
+      chosenCustomerId: customerId || null,
+      subsScanned: debug.subsScanned,
+      chosenSub: chosen || null,
+      finalPremium: premium,
+    });
+    return res.json({ premium: !!premium, email, source: 'stripe', subscription: chosen || null });
   } catch (e) {
     console.error('status-by-email error:', e);
-    return res.json({ premium: false });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ premium: false, email: '', source: 'stripe', subscription: null });
   }
 });
 

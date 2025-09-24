@@ -801,15 +801,24 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- CORS configuration (strict) ---
-const STRICT_ALLOWED = new Set(['https://aurasync.info', 'https://www.aurasync.info']);
+// --- CORS configuration (strict allowlist with extension support) ---
+const STRICT_ALLOWED = new Set([
+  'https://aurasync.info',
+  'https://www.aurasync.info',
+  // Allow GitHub Pages (used in some flows)
+  'https://aurachatapp.github.io'
+]);
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && STRICT_ALLOWED.has(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
+  if (origin) {
+    const isExtension = origin.startsWith('chrome-extension://');
+    if (STRICT_ALLOWED.has(origin) || isExtension) {
+      res.header('Access-Control-Allow-Origin', origin);
+    }
   }
   res.header('Vary', 'Origin');
-  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  // Allow GET for status endpoints
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   // Allow admin testing headers too
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Secret');
   if (req.method === 'OPTIONS') return res.status(204).end();

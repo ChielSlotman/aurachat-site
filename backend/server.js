@@ -46,6 +46,10 @@ const Stripe = require('stripe');
 const argon2 = require('argon2');
 // Ensure fetch is available (Node 18+ has global fetch)
 const _fetch = (typeof fetch !== 'undefined') ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
+// Deterministic fingerprint for codes (indexable), complementing non-deterministic argon2
+function sha256Hex(s) {
+  return crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
+}
 
 const app = express();
 // Request IDs
@@ -132,6 +136,27 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+
+// Negative cache for invalid codes to short-circuit repeated bad attempts
+const MISS_CACHE_TTL = Number(process.env.REDEEM_MISS_TTL_MS || 60_000);
+const MISS_CACHE_MAX = Number(process.env.REDEEM_MISS_MAX || 2000);
+const missCache = new Map(); // fp -> expiresAt
+function missCacheHas(fp) {
+  const now = Date.now();
+  const exp = missCache.get(fp);
+  if (!exp) return false;
+  if (exp < now) { missCache.delete(fp); return false; }
+  return true;
+}
+function missCacheSet(fp) {
+  const expires = Date.now() + MISS_CACHE_TTL;
+  missCache.set(fp, expires);
+  if (missCache.size > MISS_CACHE_MAX) {
+    // delete oldest ~10%
+    const n = Math.max(1, Math.floor(MISS_CACHE_MAX / 10));
+    for (const k of missCache.keys()) { missCache.delete(k); if (--n <= 0) break; }
+  }
+}
 
 // Stripe price → plan mapping
 const PRICE_TO_PLAN = Object.fromEntries([
@@ -235,12 +260,14 @@ async function initStorage() {
         redeemed_at BIGINT,
         origin TEXT,
         code_hash TEXT,
+        code_sha256 TEXT,
         status TEXT DEFAULT 'active',
         expires_at TIMESTAMPTZ DEFAULT (now() + interval '365 days'),
         revoked_at TIMESTAMPTZ
       )`, 'create codes table');
     // Make sure code column can be cleared post-hash backfill
     await run(`ALTER TABLE public.codes ALTER COLUMN code DROP NOT NULL`, 'alter codes.code drop not null');
+    await run(`ALTER TABLE public.codes ADD COLUMN IF NOT EXISTS code_sha256 TEXT`, 'alter codes add code_sha256');
 
     await run(`
       CREATE TABLE IF NOT EXISTS public.tokens (
@@ -300,7 +327,8 @@ async function initStorage() {
       )`, 'create purchases table');
 
     // Useful indexes (immutable predicates; no NOW() in predicates)
-    await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_code ON public.codes (code)`, 'index: codes.code unique');
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_code ON public.codes (code)`, 'index: codes.code unique');
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_sha256 ON public.codes (code_sha256) WHERE code_sha256 IS NOT NULL`, 'index: codes.code_sha256 unique where not null');
     // Note: using "note" as email placeholder during migration
     await run(`CREATE INDEX IF NOT EXISTS idx_codes_email ON public.codes (note)`, 'index: codes.email (note)');
     await run(`CREATE INDEX IF NOT EXISTS idx_codes_redeemed ON public.codes (redeemed)`, 'index: codes.redeemed');
@@ -359,8 +387,20 @@ async function initStorage() {
         process.exit(1);
       }
     };
-    await sanity('codes','code_hash');
-    await sanity('codes','status');
+  await sanity('codes','code_hash');
+  await sanity('codes','status');
+  await sanity('codes','code_sha256');
+
+    // Opportunistic lightweight backfill: fill code_sha256 where plaintext still exists
+    try {
+      await run(`
+        UPDATE public.codes
+           SET code_sha256 = CASE WHEN code IS NOT NULL THEN encode(digest(code, 'sha256'), 'hex') ELSE code_sha256 END
+         WHERE code IS NOT NULL AND code_sha256 IS NULL
+      `, 'backfill code_sha256 where plaintext');
+    } catch (e) {
+      log.warn({ err: String(e?.message || e) }, '[DB] backfill code_sha256 skipped');
+    }
   } else {
     // In-memory seed
     if (!mem.codes.has('DEMO-AURASYNC-1234')) {
@@ -386,8 +426,8 @@ async function dbCreateCodes(n, note) {
         if (rows.length === 0) break;
       }
       const hash = await argon2.hash(raw);
-  log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
-  await pool.query('INSERT INTO codes (code, code_hash, redeemed, note, created_at) VALUES ($1, $2, FALSE, $3, $4)', [raw, hash, note || '', nowMs]);
+      log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
+      await pool.query('INSERT INTO codes (code, code_hash, code_sha256, redeemed, note, created_at) VALUES ($1, $2, $3, FALSE, $4, $5)', [raw, hash, sha256Hex(raw), note || '', nowMs]);
       codes.push(raw);
     }
   } else {
@@ -395,8 +435,8 @@ async function dbCreateCodes(n, note) {
       let code;
       do { code = crypto.randomBytes(16).toString('base64url'); } while (mem.codes.has(code));
       const id = mem.nextId.code++;
-      const code_hash = await argon2.hash(code);
-      mem.codes.set(code, { id, code, code_hash, status: 'active', expires_at: Date.now() + 365*24*60*60*1000, redeemed: false, note: note || '', created_at: nowMs, redeemed_at: null, origin: '' });
+  const code_hash = await argon2.hash(code);
+  mem.codes.set(code, { id, code, code_hash, code_sha256: sha256Hex(code), status: 'active', expires_at: Date.now() + 365*24*60*60*1000, redeemed: false, note: note || '', created_at: nowMs, redeemed_at: null, origin: '' });
       codes.push(code);
     }
   }
@@ -417,14 +457,39 @@ async function dbRedeem(codeStr, origin, email) {
     const client = await pool.connect();
     try {
       await q(client, 'begin', 'BEGIN');
-      // Find code by hash or plaintext across all codes
-      const selAll = await q(client, 'select_codes_any', 'SELECT id, code, code_hash, redeemed, status, expires_at, note FROM public.codes FOR UPDATE');
-      let c = null;
-      for (const r of selAll.rows) {
-        let ok = false;
-        if (r.code_hash) ok = await argon2.verify(r.code_hash, codeStr).catch(() => false);
-        if (!ok && r.code) ok = (r.code === codeStr);
-        if (ok) { c = r; break; }
+  // Fast path: direct match by plaintext (legacy rows)
+  let { rows } = await q(client, 'sel_by_plain', 'SELECT id, code, code_hash, code_sha256, redeemed, status, expires_at, note FROM public.codes WHERE code=$1 FOR UPDATE', [codeStr]);
+  let c = rows[0] || null;
+  let verified = false;
+  if (c && c.code === codeStr) verified = true;
+      // Fast path: fingerprint match for hashed-only rows
+      if (!c) {
+        const fp = sha256Hex(codeStr);
+        ({ rows } = await q(client, 'sel_by_fp', 'SELECT id, code, code_hash, code_sha256, redeemed, status, expires_at, note FROM public.codes WHERE code_sha256=$1 FOR UPDATE', [fp]));
+        if (rows[0]) {
+          const row = rows[0];
+          const ok = row.code_hash ? await argon2.verify(row.code_hash, codeStr).catch(() => false) : false;
+          if (ok) { c = row; verified = true; }
+        }
+      }
+      // Legacy fallback: scan limited recent candidates (avoids full table scan)
+      if (!c) {
+        const recent = await q(client, 'sel_recent_candidates', `
+          SELECT id, code, code_hash, code_sha256, redeemed, status, expires_at, note
+          FROM public.codes
+          WHERE (redeemed = FALSE OR status = 'active')
+          ORDER BY created_at DESC
+          LIMIT 500
+          FOR UPDATE`);
+        for (const r of recent.rows) {
+          let ok = false;
+          if (r.code && r.code === codeStr) ok = true;
+          else if (r.code_hash) ok = await argon2.verify(r.code_hash, codeStr).catch(() => false);
+          if (ok) { c = r; if (r.code_hash) verified = true; break; }
+        }
+        if (c && !c.code_sha256) {
+          try { await q(client, 'backfill_fp', 'UPDATE public.codes SET code_sha256=$1 WHERE id=$2', [sha256Hex(codeStr), c.id]); } catch (_) {}
+        }
       }
       if (!c) { throw new Error('INVALID_CODE'); }
       // Check used/expired status
@@ -439,15 +504,16 @@ async function dbRedeem(codeStr, origin, email) {
         await q(client, 'bind_email', 'UPDATE public.codes SET note=$1 WHERE id=$2', [norm, c.id]);
       }
       // Verify hash or legacy plaintext
-      let ok = false;
-      if (c.code_hash) {
+      let ok = verified;
+      if (!ok && c.code_hash) {
         ok = await argon2.verify(c.code_hash, codeStr).catch(() => false);
       }
       if (!ok && c.code) {
         ok = (c.code === codeStr);
         if (ok) {
           const h = await argon2.hash(c.code);
-          await q(client, 'backfill_hash', 'UPDATE codes SET code_hash=$1, code=NULL WHERE id=$2', [h, c.id]);
+          const fp = c.code_sha256 || sha256Hex(c.code);
+          await q(client, 'backfill_hash', 'UPDATE public.codes SET code_hash=$1, code=NULL, code_sha256=COALESCE(code_sha256, $3) WHERE id=$2', [h, c.id, fp]);
         }
       }
       if (!ok) throw new Error('INVALID_CODE');
@@ -462,11 +528,11 @@ async function dbRedeem(codeStr, origin, email) {
       );
       const tokId = insTok.rows[0].id;
       log.info({ params: { redeemed_at: nowMs, origin: origin || '', status: 'used', code_id: c.id } }, '[DB] update_code_used params');
-      await q(client, 'update_code_used', 'UPDATE codes SET redeemed=TRUE, redeemed_at=$1, origin=$2, status = $3 WHERE id=$4', [nowMs, origin || '', 'used', c.id]);
+  await q(client, 'update_code_used', 'UPDATE public.codes SET redeemed=TRUE, redeemed_at=$1, origin=$2, status = $3 WHERE id=$4', [nowMs, origin || '', 'used', c.id]);
       // Clear legacy plaintext if any (best effort)
       try {
         log.info({ params: { code_id: c.id } }, '[DB] clear_plain params');
-        await q(client, 'clear_plain', 'UPDATE codes SET code=NULL WHERE id=$1', [c.id]);
+        await q(client, 'clear_plain', 'UPDATE public.codes SET code=NULL WHERE id=$1', [c.id]);
       } catch (_) {}
       log.info({ params: { code_id: c.id, token_id: tokId, origin: origin || '', created_at: nowMs } }, '[DB] insert_redemption params');
       await q(client, 'insert_redemption', 'INSERT INTO redemptions (code_id, token_id, origin, created_at) VALUES ($1, $2, $3, $4)', [c.id, tokId, origin || '', nowMs]);
@@ -508,12 +574,18 @@ async function dbRedeem(codeStr, origin, email) {
 async function dbRedeemWithEmailBind({ code, email, origin }) {
   if (!code || typeof code !== 'string') return { error: 'invalid_code' };
   try {
-    const out = await dbRedeem(code.trim(), origin || '', email || null);
+    const raw = code.trim();
+    const fp = sha256Hex(raw);
+    if (missCacheHas(fp)) return { error: 'invalid_code' };
+    const out = await dbRedeem(raw, origin || '', email || null);
     if (out && out.token) return { token: out.token };
     return { error: 'redeem_failed' };
   } catch (e) {
     const msg = String((e && e.message) || e || '');
-    if (msg === 'INVALID_CODE') return { error: 'invalid_code' };
+    if (msg === 'INVALID_CODE') {
+      try { missCacheSet(sha256Hex(code)); } catch {}
+      return { error: 'invalid_code' };
+    }
     if (msg === 'EXPIRED_CODE') return { error: 'already_used_or_expired' };
     return { error: 'redeem_failed' };
   }
@@ -693,14 +765,33 @@ async function sendLicenseEmailSimple(email, code) {
 async function dbFindCodeByPlainOrHash(codeStr) {
   if (!codeStr) return null;
   if (pool) {
-    const { rows } = await pool.query('SELECT id, code, code_hash, note, created_at FROM public.codes');
+    // Try fast paths first
+    let r;
+    r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code=$1 LIMIT 1', [codeStr]);
+    if (r.rows[0]) return r.rows[0];
+    const fp = sha256Hex(codeStr);
+    r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code_sha256=$1 LIMIT 1', [fp]);
+    if (r.rows[0]) {
+      const row = r.rows[0];
+      try {
+        if (row.code_hash && await argon2.verify(row.code_hash, codeStr)) return row;
+      } catch {}
+    }
+    // Fallback scan (rare)
+    const { rows } = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes ORDER BY created_at DESC LIMIT 1000');
     for (const r of rows) {
       let ok = false;
       if (r.code_hash) {
         try { ok = await argon2.verify(r.code_hash, codeStr); } catch (_) { ok = false; }
       }
       if (!ok && r.code) ok = (r.code === codeStr);
-      if (ok) return r;
+      if (ok) {
+        // backfill missing fingerprint if needed
+        if (!r.code_sha256) {
+          try { await pool.query('UPDATE public.codes SET code_sha256=$1 WHERE id=$2', [sha256Hex(codeStr), r.id]); } catch {}
+        }
+        return r;
+      }
     }
     return null;
   } else {
@@ -1104,8 +1195,8 @@ async function issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionI
       }
       const hash = await argon2.hash(raw);
       await client.query(
-        'INSERT INTO public.codes (code, code_hash, redeemed, note, created_at, status) VALUES ($1, $2, FALSE, $3, $4, $5)',
-        [raw, hash, email, nowMs, 'active']
+        'INSERT INTO public.codes (code, code_hash, code_sha256, redeemed, note, created_at, status) VALUES ($1, $2, $3, FALSE, $4, $5, $6)',
+        [raw, hash, sha256Hex(raw), email, nowMs, 'active']
       );
       await client.query('INSERT INTO public.purchases (session_id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING', [sessionId, email]);
       await client.query('COMMIT');
@@ -1209,6 +1300,7 @@ app.post('/billing-portal', validate(BillingSchema), async (req, res) => {
 // POST /redeem { code }
 app.post('/redeem', validate(RedeemSchema), async (req, res) => {
   try {
+    const t0 = Date.now();
     const { email, code } = req.valid;
     if (!code) return res.status(400).json({ error: 'missing_code' });
     const normEmail = email ? normalizeEmail(email) : null;
@@ -1242,8 +1334,12 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
       result = await dbRedeemWithEmailBind({ code, email: normEmail, origin });
     } catch (e) {
       log.error({ err: String(e?.message || e) }, 'redeem_failed');
+      const ms = Date.now() - t0;
+      log.info({ ms }, 'redeem_latency');
       return res.status(500).json({ error: 'redeem_failed' });
     }
+    const ms = Date.now() - t0;
+    log.info({ ms }, 'redeem_latency');
     if (result?.error === 'invalid_code') return res.status(400).json({ error: 'invalid_code' });
     if (result?.error === 'already_used_or_expired') return res.status(400).json({ error: 'already_used_or_expired' });
     if (!result?.token) return res.status(500).json({ error: 'redeem_failed' });

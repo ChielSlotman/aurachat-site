@@ -101,12 +101,10 @@ const RedeemSchema = z.object({
   email: z.string().email().optional(),
   code: z.string().min(8).max(200).transform((s) => s.trim())
 });
+// Legacy lost-code schema (kept for admin/test handler). The public /lost-code route is simplified below.
 const LostCodeSchema = z.object({
   email: z.string().email(),
   token: z.string().min(10).max(500),
-  // Optional testing override: when allowed, request can set force=true to bypass cooldown
-  // This is honored ONLY if Authorization: Bearer <ADMIN_SECRET> is provided OR
-  // env ALLOW_FORCE_LOST_CODE=true is set (intended for local/dev only)
   force: z.boolean().optional(),
 });
 
@@ -657,6 +655,40 @@ async function hasActiveOrTrialingStripe(email) {
   return false;
 }
 
+// --- Minimal helpers to mirror purchase behavior for the new /lost-code endpoint ---
+async function isActiveSubscriber(email) {
+  // Same definition as purchase: active or trialing on Stripe
+  return await hasActiveOrTrialingStripe(email);
+}
+
+async function getOrCreateLicenseCode(email) {
+  const norm = normalizeEmail(email);
+  // Try to fetch the most recent active code with plaintext value
+  if (pool) {
+    try {
+      const { rows } = await pool.query(
+        "SELECT id, code FROM public.codes WHERE note=$1 AND status='active' ORDER BY created_at DESC LIMIT 1",
+        [norm]
+      );
+      const row = rows[0];
+      if (row && row.code) return row.code;
+    } catch (_) {}
+  } else {
+    const list = [...mem.codes.values()]
+      .filter(c => normalizeEmail(c.note||'') === norm && (c.status || (c.redeemed ? 'used' : 'active')) === 'active')
+      .sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+    if (list[0]?.code) return list[0].code;
+  }
+  // Otherwise issue a new one using the same generator used on purchase
+  const { code } = await issueLicenseForPlan({ email: norm, plan: 'premium', priceId: null, mode: 'lost-code', subId: null, sessionId: `lost-code:${Date.now()}` });
+  return code;
+}
+
+async function sendLicenseEmailSimple(email, code) {
+  // Reuse purchase email sender/template
+  await sendLicenseEmail({ to: email, code, plan: 'premium', mode: 'lost-code' });
+}
+
 // Helper: find a code row by matching plaintext or verifying code_hash
 async function dbFindCodeByPlainOrHash(codeStr) {
   if (!codeStr) return null;
@@ -1111,7 +1143,8 @@ async function recordPurchaseEvent({ kind, plan, priceId, mode, subId, sessionId
 const burstLimiter = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
 app.use('/stripe/webhook', burstLimiter);
 const codeLimiter = rateLimit({ windowMs: 5 * 60_000, max: 10, keyGenerator: (req) => (req.body?.email || req.ip) });
-app.use(['/activate', '/lost-code'], codeLimiter);
+// Apply only to /activate; /lost-code has a separate daily limiter per spec
+app.use(['/activate'], codeLimiter);
 
 app.post('/activate', validate(ActivateSchema), async (req, res) => {
   try {
@@ -1289,100 +1322,45 @@ app.post('/regenerate', async (req, res) => {
   }
 });
 
-// --- Lost code self-service: validate active sub, 7-day cooldown, send new code ---
-
-// --- Lost code self-service: allow revoked/expired tokens for recovery lookup only ---
-app.post('/lost-code', validate(LostCodeSchema), async (req, res) => {
+// --- Lost code (minimal): POST /lost-code with { email } ---
+const lostCodeDailyMap = new Map(); // simple per-email 1/day limiter
+app.post('/lost-code', async (req, res) => {
   try {
-    // Normalize and trim all inputs
-    const email = normalizeEmail(req.valid.email);
-    const token = String(req.valid.token || '').trim();
-    const wantForce = Boolean(req.valid.force === true);
-  if (!email || !token) return res.status(400).json({ error: 'missing_token' });
-    if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
-
-    // Rate limit per IP+email for lost-code
-    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
-    const keyRL = `lost:${ip}:${email}`;
-    const nowMsRL = Date.now();
-    let arrRL = rateLimitMap.get(keyRL) || [];
-    arrRL = arrRL.filter(ts => nowMsRL - ts < RATE_LIMIT_WINDOW);
-    if (arrRL.length >= RATE_LIMIT_MAX) {
-      return res.status(429).json({ error: 'Too many attempts, try again later.' });
-    }
-    arrRL.push(nowMsRL);
-    rateLimitMap.set(keyRL, arrRL);
-
-    // Token lookup (allow revoked/expired tokens for recovery lookup only)
-    const t = await dbGetToken(token);
-    let codeRow = null;
-    if (process.env.LOG_LEVEL === 'debug') {
-      console.log('[lost-code] input', { email, token_len: token.length, db: pool ? 'pg' : 'memory', foundToken: !!t });
-    }
-    if (t) {
-      // Resolve ownership from token
-      codeRow = await dbGetCodeByToken(token);
-      if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] via token -> codeRow?', !!codeRow);
-    } else {
-      // If token not found, user might have pasted their license code. Try matching it.
-      const asCode = await dbFindCodeByPlainOrHash(token);
-      if (!asCode) return res.status(404).json({ error: 'invalid_token' });
-      codeRow = asCode;
-      if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] via code match -> codeRow?', !!codeRow);
-    }
-    if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
-  const expectedEmail = normalizeEmail((codeRow.token_email || codeRow.note || '').toString());
-    if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
-
-    // Subscription check: Require active subscription; support fallback license source when Stripe data is delayed
-    const active = await hasActiveSubscription(email);
-    if (!active) {
-      if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] subscription_not_active or customer_not_found for', email);
-      // Mirror prior error surface: customer_not_found if Stripe had no customer, otherwise subscription_not_active
-      try {
-        const customers = await stripe.customers.list({ email, limit: 1 });
-        if (!customers?.data?.length) return res.status(404).json({ error: 'customer_not_found' });
-      } catch (_) {}
-      return res.status(403).json({ error: 'subscription_not_active' });
+    res.setHeader('Cache-Control', 'no-store');
+    const email = normalizeEmail(String(req.body?.email || ''));
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ success: false, error: 'invalid_input' });
     }
 
-    // Cooldown logic: allow bypass if
-    //  - Authorization Bearer ADMIN_SECRET or X-Admin-Secret matches ADMIN_SECRET, or
-    //  - env DEV_BYPASS_REGEN_COOLDOWN=true, or
-    //  - env ALLOW_FORCE_LOST_CODE=true and body.force===true
-    let bypass = String(process.env.DEV_BYPASS_REGEN_COOLDOWN || '').toLowerCase() === 'true';
-    const auth = req.headers['authorization'] || '';
-    const hdrAdmin = req.headers['x-admin-secret'];
-    const isAdmin = (hdrAdmin && hdrAdmin === ADMIN_SECRET) || (auth && /^Bearer\s+/.test(auth) && auth.replace(/^Bearer\s+/i, '').trim() === ADMIN_SECRET);
-    if (!bypass) {
-      const allowForce = String(process.env.ALLOW_FORCE_LOST_CODE || '').toLowerCase() === 'true';
-      if (wantForce && allowForce) bypass = true;
-    }
-    if (!bypass && isAdmin && wantForce) bypass = true;
-    if (process.env.LOG_LEVEL === 'debug') console.log('[lost-code] cooldown bypass =', bypass, { wantForce, isAdmin });
-    if (!bypass) {
-      const last = await dbLatestCodeForEmail(email);
-      const sevenDays = 7 * 24 * 60 * 60 * 1000;
-      if (last && last.created_at) {
-        const age = Date.now() - Number(last.created_at);
-        if (age <= sevenDays) {
-          const retryAfterIso = new Date(Number(last.created_at) + sevenDays).toISOString();
-          return res.status(429).json({ error: 'too_soon', retry_after: retryAfterIso });
-        }
-      }
+    // Optional: 1 email/day
+    const last = lostCodeDailyMap.get(email) || 0;
+    const nowMs = Date.now();
+    if (nowMs - last < 24*60*60*1000) {
+      return res.status(429).json({ success: false, error: 'rate_limited' });
     }
 
-    // Rotation: revoke current token and all tokens for this code
-    await dbRevokeToken(token); // ok if already revoked
-    if (codeRow.id) await dbRevokeTokensByCodeId(codeRow.id);
-    const [newCode] = await dbCreateCodes(1, email);
-    await sendEmail(email, 'Your AuraSync license code', renderLicenseEmailHtml(newCode));
+    // 1) Reuse purchase subscription check (active or trialing)
+    const premium = await isActiveSubscriber(email);
+    if (!premium) {
+      return res.status(400).json({ success: false, error: 'no_subscription' });
+    }
 
-    // Success
-    return res.json({ success: true });
+    // 2) Reuse purchase code source
+    const code = await getOrCreateLicenseCode(email);
+
+    // 3) Reuse purchase email sender/template
+    try {
+      await sendLicenseEmailSimple(email, code);
+    } catch (e) {
+      console.error('lost-code send error', e);
+      return res.status(500).json({ success: false, error: 'send_failed' });
+    }
+
+    lostCodeDailyMap.set(email, nowMs);
+    return res.status(200).json({ success: true });
   } catch (e) {
-    console.error('Lost-code error:', e);
-    return res.status(500).json({ error: 'server_error' });
+    console.error('lost-code error', e);
+    return res.status(500).json({ success: false, error: 'send_failed' });
   }
 });
 

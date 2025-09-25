@@ -20,7 +20,7 @@
 </head>
 <body>
   <h1>Admin: Test Lost Code</h1>
-  <p class="muted">Bypass the 7‑day limit for testing. Requires the backend ADMIN_SECRET.</p>
+  <p class="muted">Admin-only replacement send for testing. Requires the backend ADMIN_SECRET.</p>
 
   <div class="card">
     <label>Email</label>
@@ -40,9 +40,9 @@
       </div>
     </div>
 
-    <button id="send" class="btn">Send replacement now (force)</button>
+  <button id="send" class="btn">Send replacement now (admin)</button>
     <div id="out" style="margin-top:12px"></div>
-    <small>Posts to <code>/lost-code</code> with <code>force=true</code> and Authorization: Bearer.</small>
+  <small>Posts to <code>/admin/test-lost-code</code> with Authorization: Bearer.</small>
   </div>
 
   <script>
@@ -54,13 +54,13 @@
       const secret = $('#secret').value.trim();
       $('#out').textContent = 'Sending…';
       try{
-        const res = await fetch(base + '/lost-code', {
+        const res = await fetch(base + '/admin/test-lost-code', {
           method:'POST',
           headers:{
             'Content-Type':'application/json',
             ...(secret? { 'Authorization': 'Bearer '+secret } : {})
           },
-          body: JSON.stringify({ email, token, force:true })
+          body: JSON.stringify({ email, token })
         });
         const data = await res.json().catch(()=>({}));
         if(res.ok){

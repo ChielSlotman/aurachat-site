@@ -63,6 +63,24 @@ Requirements:
 - Python 3.x installed and available on PATH (it will try `pythonw.exe`, then `python.exe`, then `py.exe`).
 - Node.js and npm installed (the first run will install backend dependencies automatically).
 
+## Generate a license code (Windows)
+
+If you want a simple double‑click tool to issue a usable license code for a customer email, use:
+
+- `generate-license.bat` → launches a small Python GUI (`generate-license.pyw`).
+
+Steps:
+1) Make sure you know the Admin Secret. If you run locally, set `ADMIN_SECRET` in a `.env` file next to this README (or enter it in the GUI).
+2) Double‑click `generate-license.bat`.
+3) In the GUI, set:
+   - API Base URL: defaults to production `https://api.aurasync.info`. Switch to `http://127.0.0.1:3000` only if you’re running locally.
+   - Admin Secret: paste your admin secret.
+   - Customer Email: the user’s email.
+   - Plan: leave as `premium` unless you use custom plans.
+4) Click “Generate Code”. The code will be shown and copied to your clipboard. The backend also emails the code to the customer if email send is configured.
+
+Tip: To run locally, first change API Base to your localhost URL, then click “Start Local Server”. It installs dependencies and launches the backend, then the health check will pass.
+
 ## SEO
 
 Static files `robots.txt` and `sitemap.xml` are included at the web root.

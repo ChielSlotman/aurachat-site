@@ -14,30 +14,43 @@ Configure one or more price IDs so the webhook can map purchases to plans:
 
 If none are set, the server will warn on boot and ignore unrecognized prices.
 
-## Lost-code testing: bypass 7-day limit
+## Admin lost-code testing (support-only)
 
-For QA and support you can bypass the 7-day cooldown on the `/lost-code` endpoint.
+For QA/support, use the admin-only route that simulates the recovery flow without daily limits:
 
-Two ways to enable:
+- Route: `POST /admin/test-lost-code`
+- Headers: `Authorization: Bearer <ADMIN_SECRET>` (or `X-Admin-Secret: <ADMIN_SECRET>`) and `Content-Type: application/json`
+- Body: `{ "email": "user@example.com", "token": "<existing token or license code>" }`
 
-1) Send `Authorization: Bearer <ADMIN_SECRET>` header and include `{ force: true }` in the JSON body.
-	- The admin secret is configured via `ADMIN_SECRET` env.
-2) Set env `ALLOW_FORCE_LOST_CODE=true` (intended for local/dev) and include `{ force: true }` in the body.
-
-Request body shape now supports an optional `force` field:
+PowerShell example:
 
 ```
-{ "email": "user@example.com", "token": "wi_... or CODE", "force": true }
+curl -Method POST -Uri "$env:API_BASE/admin/test-lost-code" -Headers @{ 'Content-Type'='application/json'; 'Authorization'="Bearer $env:ADMIN_SECRET" } -Body '{"email":"user@example.com","token":"wi_..."}'
 ```
 
-PowerShell examples:
+There is also a simple admin page at `/admin/` to trigger this flow; it requires the admin secret.
 
-```
-# Using Authorization: Bearer ADMIN_SECRET
-curl -Method POST -Uri "$env:API_BASE/lost-code" -Headers @{ 'Content-Type'='application/json'; 'Authorization'="Bearer $env:ADMIN_SECRET" } -Body '{"email":"user@example.com","token":"wi_...","force":true}'
+## Minimal Lost Code endpoint (public)
 
-# Using ALLOW_FORCE_LOST_CODE=true (no auth header)
-curl -Method POST -Uri "$env:API_BASE/lost-code" -Headers @{ 'Content-Type'='application/json' } -Body '{"email":"user@example.com","token":"wi_...","force":true}'
-```
+Add-on/extension uses a minimal endpoint to resend the license code when a user has an active subscription.
 
-There is also a simple admin page at `/admin/` that posts to `/lost-code` with `force:true`. It requires pasting the admin secret in the form to send the Authorization header.
+- Route: `POST /lost-code`
+- Headers: `Content-Type: application/json`
+- Body: `{ "email": "user@example.com" }`
+- Success: `200 { "success": true }`
+- Failures:
+	- `400 { "success": false, "error": "invalid_input" }` (bad or missing email)
+	- `400 { "success": false, "error": "no_subscription" }` (not active or trialing)
+	- `429 { "success": false, "error": "rate_limited" }` (optional 1 email/day, in-memory)
+	- `500 { "success": false, "error": "send_failed" }` (provider/email error)
+
+Behavior:
+1) Normalize email (trim + lowercase).
+2) Check subscription using the same helper as purchase (active OR trialing on Stripe).
+3) Get the same license code used on purchase (reuse generator/format when needed).
+4) Send the same email template as purchase.
+5) Return `{ success: true }`.
+
+Headers:
+- CORS: uses the existing allowlist, including the extension origin.
+- Cache: `Cache-Control: no-store`.

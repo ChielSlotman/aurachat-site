@@ -982,7 +982,8 @@ app.get('/debug/stripe', async (_req, res) => {
 // (Removed legacy /webhook handler)
 
 // Stripe webhook (idempotent code issuance) — must be before express.json()
-app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
+// Hardened Stripe webhook handler: strict size limit, event allowlist, livemode guard
+app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
   const requestId = crypto.randomUUID();
   try {
     if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(500).json({ error: 'webhook_not_configured' });
@@ -994,6 +995,25 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
       return res.status(400).send('Bad signature');
     }
     const evtId = event.id;
+    const allowEvents = new Set([
+      'checkout.session.completed',
+      'invoice.payment_succeeded',
+      'invoice.paid',
+      'invoice_payment.paid'
+    ]);
+    if (!allowEvents.has(event.type)) {
+      // Immediately acknowledge to prevent retries but do nothing else
+      return res.sendStatus(200);
+    }
+    // Optional livemode vs key check (best-effort, skip if missing api key)
+    try {
+      const key = process.env.STRIPE_SECRET_KEY || '';
+      const keyIsLive = key.startsWith('sk_live_');
+      if (typeof event.livemode === 'boolean' && event.livemode !== keyIsLive) {
+        console.warn('[WH] livemode/key mismatch', { event_livemode: event.livemode, keyIsLive });
+        return res.sendStatus(200); // do not process
+      }
+    } catch (_) {}
     // DB-backed idempotency: insert-once and bail if duplicate
     const firstTime = await markProcessedOnce(evtId).catch((e) => {
       log.error({ err: String(e?.message || e) }, '[WH] processed mark failed');
@@ -1004,6 +1024,8 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
       return res.sendStatus(200);
     }
     const type = event.type;
+
+    // --- Handle Checkout Session (one-time payments or subscriptions) ---
     if (type === 'checkout.session.completed') {
       const sessObj = event.data?.object;
       const sessionId = sessObj?.id;
@@ -1026,7 +1048,9 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
   const email = normalizeEmail(session.customer_details?.email || session.customer?.email || session.customer_email || '');
       if (!email) return res.status(400).json({ error: 'no_email' });
 
-      const items = (session.line_items && session.line_items.data) ? session.line_items.data : [];
+      const itemsAll = (session.line_items && session.line_items.data) ? session.line_items.data : [];
+      // Cap processed items to avoid pathological large payloads
+      const items = itemsAll.slice(0, 25);
       const plans = [];
       for (const it of items) {
         const priceId = it?.price?.id;
@@ -1057,7 +1081,7 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
             await recordPurchaseEvent({ kind: 'checkout.session.completed', plan, priceId, mode, subId, sessionId, email });
           }
         }
-        log.info({ type, mode, email, priceIds }, '[WH] OK');
+        log.info({ type, mode, email, priceIds, trigger: 'checkout.session.completed' }, '[WH] OK');
         return res.sendStatus(200);
       } catch (err) {
         log.error({ err: String(err?.message || err), type, mode, sessionId }, '[WH] error issuing license');
@@ -1066,15 +1090,68 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), async 
       }
     }
 
-    if (type === 'invoice.paid') {
+    // --- Handle Invoice events (initial subscription payments) ---
+    // Support legacy & new naming: invoice.payment_succeeded, invoice.paid (older), invoice_payment.paid (2025+ alias)
+    const INVOICE_EVENTS = new Set([
+      'invoice.payment_succeeded',
+      'invoice.paid', // legacy (already existed in code)
+      'invoice_payment.paid'
+    ]);
+    if (INVOICE_EVENTS.has(type)) {
       const invoice = event.data?.object || {};
       const reason = invoice.billing_reason;
+      const paid = !!invoice.paid || invoice.status === 'paid';
+      // Skip renewals: only issue license on first creation (subscription_create) or if reason is not subscription_cycle
+      if (!paid) {
+        log.info({ type, reason, paid }, '[WH] invoice not paid yet');
+        return res.sendStatus(200);
+      }
       if (reason === 'subscription_cycle') {
         log.info({ type, reason, subscription: invoice.subscription }, '[WH] renewal processed (no new code)');
         return res.sendStatus(200);
       }
-      // Other invoice paid reasons can be no-ops for now
-      log.info({ type, reason }, '[WH] invoice.paid ignored');
+      // Extract email
+      const rawEmail = (invoice.customer_email || invoice.customer_details?.email || '').toString();
+      const email = normalizeEmail(rawEmail);
+      if (!email) {
+        log.warn({ type, reason }, '[WH] invoice missing email');
+        return res.sendStatus(200);
+      }
+      // Collect price/plan mappings from line items
+      const linesAll = (invoice.lines && invoice.lines.data) ? invoice.lines.data : [];
+      const lines = linesAll.slice(0, 40); // cap invoice line processing
+      const valid = [];
+      for (const li of lines) {
+        try {
+          const priceId = li?.price?.id;
+          const qty = li?.quantity || 1;
+            if (!priceId) continue;
+          const plan = PRICE_TO_PLAN[priceId];
+          if (!plan) {
+            log.warn({ priceId }, '[WH] unrecognized price id (invoice)');
+            continue;
+          }
+          valid.push({ plan, priceId, quantity: qty });
+        } catch (_) { /* ignore malformed line */ }
+      }
+      if (valid.length === 0) {
+        log.warn({ type, items: lines.map(l=>l?.price?.id) }, '[WH] no recognized price ids (invoice)');
+        return res.sendStatus(200);
+      }
+      const subId = invoice.subscription || null;
+      const sessionId = `invoice:${invoice.id}`; // synthetic session id for idempotency tracking
+      try {
+        for (const { plan, priceId, quantity } of valid) {
+          for (let i = 0; i < quantity; i++) {
+            const info = await issueLicenseForPlan({ email, plan, priceId, mode: 'subscription', subId, sessionId });
+            await sendLicenseEmail({ to: email, code: info.code, plan, mode: 'subscription' });
+            await recordPurchaseEvent({ kind: type, plan, priceId, mode: 'subscription', subId, sessionId, email });
+          }
+        }
+        log.info({ type, email, reason, subscription: subId, trigger: 'invoice_event' }, '[WH] OK');
+      } catch (err) {
+        log.error({ err: String(err?.message || err), type, subscription: subId }, '[WH] error issuing license (invoice)');
+      }
       return res.sendStatus(200);
     }
 

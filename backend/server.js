@@ -159,19 +159,31 @@ function missCacheSet(fp) {
   }
 }
 
-// Stripe price → plan mapping
-const PRICE_TO_PLAN = Object.fromEntries([
-  [process.env.STRIPE_PRICE_MONTHLY, 'monthly'],
-  [process.env.STRIPE_PRICE_YEARLY, 'yearly'],
-  [process.env.STRIPE_PRICE_LIFETIME, 'lifetime'],
-].filter(([k]) => k));
+// Dynamically load all STRIPE_PRICE_* env vars.
+// Plan name derived from suffix after STRIPE_PRICE_ (lowercased), e.g. STRIPE_PRICE_MONTHLY -> 'monthly'.
+const PRICE_TO_PLAN = {};
+const ALLOWED_PRICES = [];
+for (const [key, val] of Object.entries(process.env)) {
+  if (!key.startsWith('STRIPE_PRICE_')) continue;
+  const priceId = (val || '').trim();
+  if (!priceId) continue;
+  const plan = key.replace('STRIPE_PRICE_', '').toLowerCase();
+  PRICE_TO_PLAN[priceId] = plan;
+  ALLOWED_PRICES.push(priceId);
+}
+// Backward-compatible support for STRIPE_ALLOWED_PRICE_IDS (comma-separated)
 const EXTRA_ALLOWED = (process.env.STRIPE_ALLOWED_PRICE_IDS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
-for (const id of EXTRA_ALLOWED) if (!PRICE_TO_PLAN[id]) PRICE_TO_PLAN[id] = 'extra';
-if (Object.keys(PRICE_TO_PLAN).length === 0) {
-  console.warn('[STRIPE] No price IDs configured. Set STRIPE_PRICE_MONTHLY/YEARLY/LIFETIME or STRIPE_ALLOWED_PRICE_IDS');
+for (const id of EXTRA_ALLOWED) {
+  if (!ALLOWED_PRICES.includes(id)) ALLOWED_PRICES.push(id);
+  if (!PRICE_TO_PLAN[id]) PRICE_TO_PLAN[id] = 'extra';
+}
+if (ALLOWED_PRICES.length === 0) {
+  console.warn('[STRIPE] No price IDs configured. Define STRIPE_PRICE_* env vars.');
+} else {
+  console.info('[INIT] Allowed Stripe price IDs:', ALLOWED_PRICES.join(', '));
 }
 
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
@@ -1061,14 +1073,14 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json', limit: '1
       for (const it of items) {
         const priceId = it?.price?.id;
         if (!priceId) continue;
-        const plan = PRICE_TO_PLAN[priceId];
-        if (!plan) {
+        if (!ALLOWED_PRICES.includes(priceId)) {
           log.warn({ priceId }, '[WH] unrecognized price id');
           continue;
         }
+        const plan = PRICE_TO_PLAN[priceId] || 'unknown';
         plans.push({ priceId, plan, quantity: it?.quantity || 1 });
       }
-      const valid = plans.filter(p => p.plan);
+      const valid = plans;
       if (valid.length === 0) {
         log.warn({ items: items.map(i => i?.price?.id) }, '[WH] no recognized price ids');
         return res.sendStatus(200);
@@ -1131,12 +1143,12 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json', limit: '1
         try {
           const priceId = li?.price?.id;
           const qty = li?.quantity || 1;
-            if (!priceId) continue;
-          const plan = PRICE_TO_PLAN[priceId];
-          if (!plan) {
+          if (!priceId) continue;
+          if (!ALLOWED_PRICES.includes(priceId)) {
             log.warn({ priceId }, '[WH] unrecognized price id (invoice)');
             continue;
           }
+          const plan = PRICE_TO_PLAN[priceId] || 'unknown';
           valid.push({ plan, priceId, quantity: qty });
         } catch (_) { /* ignore malformed line */ }
       }

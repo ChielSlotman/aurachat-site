@@ -135,6 +135,7 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
+const ALLOW_DUPLICATES = String(process.env.ALLOW_DUPLICATES || 'false').toLowerCase() === 'true';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 // Negative cache for invalid codes to short-circuit repeated bad attempts
@@ -1015,13 +1016,18 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json', limit: '1
       }
     } catch (_) {}
     // DB-backed idempotency: insert-once and bail if duplicate
-    const firstTime = await markProcessedOnce(evtId).catch((e) => {
-      log.error({ err: String(e?.message || e) }, '[WH] processed mark failed');
-      return false;
-    });
-    if (!firstTime) {
-      console.info(`[WH2 ${requestId}] duplicate or mark-failed event ${evtId}`);
-      return res.sendStatus(200);
+    let firstTime = true;
+    if (!ALLOW_DUPLICATES) {
+      firstTime = await markProcessedOnce(evtId).catch((e) => {
+        log.error({ err: String(e?.message || e) }, '[WH] processed mark failed');
+        return false;
+      });
+      if (!firstTime) {
+        console.info(`[WH2 ${requestId}] duplicate or mark-failed event ${evtId}`);
+        return res.sendStatus(200);
+      }
+    } else {
+      console.warn(`[WH2 ${requestId}] ALLOW_DUPLICATES override active – processing event ${evtId} even if previously seen`);
     }
     const type = event.type;
 

@@ -1529,13 +1529,41 @@ app.get('/status', async (req, res) => {
     let status = 'inactive';
     let subscriptionId = null;
     let canceledAt = null;
-    if (license) {
+    let premium = false;
+    if (license && license.subscription_id) {
       status = license.status || (license.active ? 'active' : 'inactive');
-      subscriptionId = license.subscription_id || null;
+      subscriptionId = license.subscription_id;
       canceledAt = license.canceled_at ? new Date(license.canceled_at).toISOString() : null;
+      premium = ['active', 'trialing', 'past_due'].includes(status);
+    } else if (stripe) {
+      // Fallback: query Stripe for customer/subscription
+      try {
+        const customers = await stripe.customers.list({ email: rawEmail, limit: 1 });
+        const customer = customers.data[0];
+        if (customer) {
+          const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 10 });
+          const best = subs.data.find(s => ['active','trialing','past_due'].includes(s.status));
+          if (best) {
+            status = best.status;
+            subscriptionId = best.id;
+            premium = true;
+            // Upsert license record for future fast lookup
+            await upsertLicenseSubscription({ email: rawEmail, subscriptionId: best.id, status: best.status });
+          } else {
+            // If canceled, find most recent
+            const canceled = subs.data.find(s => s.status === 'canceled');
+            if (canceled) {
+              status = 'canceled';
+              subscriptionId = canceled.id;
+              canceledAt = canceled.canceled_at ? new Date(canceled.canceled_at * 1000).toISOString() : null;
+              await upsertLicenseSubscription({ email: rawEmail, subscriptionId: canceled.id, status: 'canceled' });
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[status] stripe fallback error', e?.message || e);
+      }
     }
-    // premium derivation
-    const premium = ['active', 'trialing', 'past_due'].includes(status) ? true : false;
     if (process.env.NODE_ENV !== 'production') {
       console.info('[status] resp', { email: displayEmail, status, premium, subscriptionId });
     }
@@ -1568,12 +1596,38 @@ app.get('/status-by-email', async (req, res) => {
     let status = 'inactive';
     let subscriptionId = null;
     let canceledAt = null;
-    if (license) {
+    let premium = false;
+    if (license && license.subscription_id) {
       status = license.status || (license.active ? 'active' : 'inactive');
-      subscriptionId = license.subscription_id || null;
+      subscriptionId = license.subscription_id;
       canceledAt = license.canceled_at ? new Date(license.canceled_at).toISOString() : null;
+      premium = ['active', 'trialing', 'past_due'].includes(status);
+    } else if (stripe) {
+      try {
+        const customers = await stripe.customers.list({ email: norm, limit: 1 });
+        const customer = customers.data[0];
+        if (customer) {
+          const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 10 });
+          const best = subs.data.find(s => ['active','trialing','past_due'].includes(s.status));
+          if (best) {
+            status = best.status;
+            subscriptionId = best.id;
+            premium = true;
+            await upsertLicenseSubscription({ email: norm, subscriptionId: best.id, status: best.status });
+          } else {
+            const canceled = subs.data.find(s => s.status === 'canceled');
+            if (canceled) {
+              status = 'canceled';
+              subscriptionId = canceled.id;
+              canceledAt = canceled.canceled_at ? new Date(canceled.canceled_at * 1000).toISOString() : null;
+              await upsertLicenseSubscription({ email: norm, subscriptionId: canceled.id, status: 'canceled' });
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[status-by-email] stripe fallback error', e?.message || e);
+      }
     }
-    const premium = ['active', 'trialing', 'past_due'].includes(status) ? true : false;
     if (process.env.NODE_ENV !== 'production') console.info('[status-by-email] resp', { email: norm, status, premium, subscriptionId });
     return res.json({ premium, status, email: norm, subscription_id: subscriptionId, canceled_at: canceledAt });
   } catch (e) {

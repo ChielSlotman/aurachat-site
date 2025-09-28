@@ -1523,21 +1523,11 @@ app.post('/lost-code', async (req, res) => {
       return res.status(400).json({ success: false, error: 'invalid_input' });
     }
 
-    // Dev mode detection: NODE_ENV=development or X-Aura-Dev: 1 header
-    const isDev = (String(process.env.NODE_ENV).toLowerCase() === 'development') || (req.headers['x-aura-dev'] === '1');
-    let skipCooldown = false;
-    if (isDev) {
-      skipCooldown = true;
-      console.info('[lost-code] dev bypass for', email);
-    }
-
-    // Optional: 1 email/day (skip in dev)
+    // Optional: 1 email/day
+    const last = lostCodeDailyMap.get(email) || 0;
     const nowMs = Date.now();
-    if (!skipCooldown) {
-      const last = lostCodeDailyMap.get(email) || 0;
-      if (nowMs - last < 24*60*60*1000) {
-        return res.status(429).json({ success: false, error: 'rate_limited' });
-      }
+    if (nowMs - last < 24*60*60*1000) {
+      return res.status(429).json({ success: false, error: 'rate_limited' });
     }
 
     // 1) Reuse purchase subscription check (active or trialing)
@@ -1557,7 +1547,7 @@ app.post('/lost-code', async (req, res) => {
       return res.status(500).json({ success: false, error: 'send_failed' });
     }
 
-    if (!skipCooldown) lostCodeDailyMap.set(email, nowMs);
+    lostCodeDailyMap.set(email, nowMs);
     return res.status(200).json({ success: true });
   } catch (e) {
     console.error('lost-code error', e);

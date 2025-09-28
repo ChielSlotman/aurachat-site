@@ -314,7 +314,10 @@ async function initStorage() {
         email TEXT PRIMARY KEY,
         plan TEXT,
         active BOOLEAN,
-        activated_at TIMESTAMPTZ
+        activated_at TIMESTAMPTZ,
+        status TEXT DEFAULT 'active',
+        subscription_id TEXT,
+        canceled_at TIMESTAMPTZ
       )`, 'create licenses table');
 
     // Back-compat tables
@@ -552,12 +555,12 @@ async function dbRedeem(codeStr, origin, email) {
       // Upsert license record if email provided
       if (email) {
         await q(client, 'upsert_license', `
-          INSERT INTO licenses (email, plan, active, activated_at)
-          VALUES ($1, 'premium', true, NOW())
+          INSERT INTO licenses (email, plan, active, activated_at, status, subscription_id, canceled_at)
+          VALUES ($1, 'premium', true, NOW(), 'active', NULL, NULL)
           ON CONFLICT (email)
-          DO UPDATE SET active = true, plan = 'premium', activated_at = NOW()
+          DO UPDATE SET active = true, plan = 'premium', activated_at = NOW(), status = 'active', canceled_at = NULL
         `, [email.toLowerCase()]);
-        try { mem.licenses.set(normalizeEmail(email), { email: normalizeEmail(email), plan: 'premium', active: true, activated_at: new Date().toISOString() }); } catch(_) {}
+        try { mem.licenses.set(normalizeEmail(email), { email: normalizeEmail(email), plan: 'premium', active: true, activated_at: new Date().toISOString(), status: 'active', subscription_id: null, canceled_at: null }); } catch(_) {}
       }
       await q(client, 'commit', 'COMMIT');
       return { token, premium: true };
@@ -738,6 +741,78 @@ async function hasActiveOrTrialingStripe(email) {
     }
   } catch (_) {}
   return false;
+}
+// Enhanced Stripe lookup: gather customers for raw & normalized forms, inspect all subscriptions, choose best
+async function stripeFindBestSubscription(email) {
+  if (!stripe || !email) return { found: false };
+  const raw = emailForStripe(email);
+  const norm = normalizeEmail(email);
+  const attempted = [];
+  const customersSeen = new Map(); // id -> customer
+  try {
+    const variants = [];
+    if (raw) variants.push(raw);
+    if (norm && norm !== raw) variants.push(norm);
+    for (const em of variants) {
+      if (attempted.includes(em)) continue;
+      attempted.push(em);
+      // Stripe returns max 100; paginate if needed (unlikely for specific email)
+      let startingAfter = null; let pageCount = 0;
+      while (true) {
+        pageCount++;
+        const resp = await stripe.customers.list({ email: em, limit: 100, starting_after: startingAfter || undefined });
+        for (const c of resp.data) {
+          if (!customersSeen.has(c.id)) customersSeen.set(c.id, c);
+        }
+        if (!resp.has_more || resp.data.length === 0 || pageCount > 3) break;
+        startingAfter = resp.data[resp.data.length - 1].id;
+      }
+    }
+    const subsScanned = [];
+    let best = null; let bestRank = -1;
+    const rank = (s) => {
+      switch (String(s || '')) {
+        case 'active': return 5;
+        case 'trialing': return 4;
+        case 'past_due': return 3;
+        case 'unpaid': return 2;
+        case 'canceled': return 1;
+        default: return 0;
+      }
+    };
+    for (const c of customersSeen.values()) {
+      // List subscriptions for each customer (cap to 20)
+      let startingAfterSub = null; let subPage = 0;
+      while (true) {
+        subPage++;
+        const resp = await stripe.subscriptions.list({ customer: c.id, status: 'all', limit: 20, starting_after: startingAfterSub || undefined });
+        for (const s of resp.data) {
+          const st = String(s.status || '').toLowerCase();
+          const curRank = rank(st);
+          subsScanned.push({ id: s.id, status: st, customer: c.id });
+          if (curRank > bestRank) { best = s; bestRank = curRank; }
+        }
+        if (!resp.has_more || resp.data.length === 0 || subPage > 5) break;
+        startingAfterSub = resp.data[resp.data.length - 1].id;
+      }
+    }
+    if (best) {
+      return {
+        found: true,
+        status: best.status,
+        subscription_id: best.id,
+        customer_id: best.customer,
+        canceled_at: best.canceled_at ? new Date(best.canceled_at * 1000).toISOString() : null,
+        best_rank: bestRank,
+        attempted,
+        customer_count: customersSeen.size,
+        subscriptions_scanned: subsScanned
+      };
+    }
+    return { found: false, attempted, customer_count: customersSeen.size, subscriptions_scanned: subsScanned };
+  } catch (e) {
+    return { found: false, error: e?.message || String(e), attempted, customer_count: customersSeen.size };
+  }
 }
 
 // --- Minimal helpers to mirror purchase behavior for the new /lost-code endpoint ---
@@ -1097,6 +1172,9 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json', limit: '1
             const info = await issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionId });
             await sendLicenseEmail({ to: email, code: info.code, plan, mode });
             await recordPurchaseEvent({ kind: 'checkout.session.completed', plan, priceId, mode, subId, sessionId, email });
+            if (mode === 'subscription' && subId) {
+              await upsertLicenseSubscription({ email, subscriptionId: subId, status: 'active' });
+            }
           }
         }
         log.info({ type, mode, email, priceIds, trigger: 'checkout.session.completed' }, '[WH] OK');
@@ -1164,11 +1242,36 @@ app.post('/stripe/webhook', bodyParser.raw({ type: 'application/json', limit: '1
             const info = await issueLicenseForPlan({ email, plan, priceId, mode: 'subscription', subId, sessionId });
             await sendLicenseEmail({ to: email, code: info.code, plan, mode: 'subscription' });
             await recordPurchaseEvent({ kind: type, plan, priceId, mode: 'subscription', subId, sessionId, email });
+            if (subId) await upsertLicenseSubscription({ email, subscriptionId: subId, status: 'active' });
           }
         }
         log.info({ type, email, reason, subscription: subId, trigger: 'invoice_event' }, '[WH] OK');
       } catch (err) {
         log.error({ err: String(err?.message || err), type, subscription: subId }, '[WH] error issuing license (invoice)');
+      }
+      return res.sendStatus(200);
+    }
+
+    // --- Subscription cancellation / update events ---
+    if (type === 'customer.subscription.updated' || type === 'customer.subscription.deleted') {
+      const sub = event.data?.object || {};
+      const status = String(sub.status || '').toLowerCase();
+      const customerId = sub.customer;
+      let email = null;
+      if (stripe && customerId) {
+        try {
+          const cust = await stripe.customers.retrieve(customerId);
+          email = normalizeEmail(cust.email || '');
+        } catch (_) {}
+      }
+      if (email) {
+        if (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') {
+          await upsertLicenseSubscription({ email, subscriptionId: sub.id, status: 'canceled' });
+          log.info({ type, email, subscription: sub.id, newStatus: 'canceled' }, '[WH] subscription canceled recorded');
+        } else if (status === 'active' || status === 'trialing' || status === 'past_due') {
+          await upsertLicenseSubscription({ email, subscriptionId: sub.id, status });
+          log.info({ type, email, subscription: sub.id, newStatus: status }, '[WH] subscription status updated');
+        }
       }
       return res.sendStatus(200);
     }
@@ -1324,6 +1427,38 @@ async function recordPurchaseEvent({ kind, plan, priceId, mode, subId, sessionId
   } catch (_) {}
 }
 
+// Upsert or update license record with subscription linkage
+async function upsertLicenseSubscription({ email, subscriptionId, status }) {
+  const norm = normalizeEmail(email);
+  const st = status || 'active';
+  if (pool) {
+    try {
+      await pool.query(`
+        INSERT INTO licenses (email, plan, active, activated_at, status, subscription_id, canceled_at)
+        VALUES ($1, 'premium', $2, NOW(), $3, $4, CASE WHEN $3='canceled' THEN NOW() ELSE NULL END)
+        ON CONFLICT (email) DO UPDATE SET
+          status = EXCLUDED.status,
+          active = EXCLUDED.active,
+          subscription_id = EXCLUDED.subscription_id,
+          canceled_at = CASE WHEN EXCLUDED.status='canceled' THEN NOW() ELSE licenses.canceled_at END
+      `, [norm, st !== 'canceled', st, subscriptionId || null]);
+    } catch (e) {
+      console.error('upsertLicenseSubscription error', e?.message || e);
+    }
+  } else {
+    const cur = mem.licenses.get(norm) || {};
+    mem.licenses.set(norm, {
+      email: norm,
+      plan: 'premium',
+      active: st !== 'canceled',
+      activated_at: cur.activated_at || new Date().toISOString(),
+      status: st,
+      subscription_id: subscriptionId || null,
+      canceled_at: st === 'canceled' ? new Date().toISOString() : cur.canceled_at || null
+    });
+  }
+}
+
 // POST /activate { session_id }
 // Apply rate limits
 const burstLimiter = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
@@ -1447,34 +1582,107 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
 
 // GET /status?token=...  (treat token as email for now)
 // Always returns JSON { premium: boolean, email: string }
+const BUILD_HASH = process.env.BUILD_HASH || require('crypto').createHash('sha1').update(String(Date.now())).digest('hex').slice(0,8);
 app.get('/status', async (req, res) => {
+  const t0 = Date.now();
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
   try {
-    // Back-compat: some clients send ?token=<email>; also accept ?email=
     const rawIn = String((req.query.email ?? req.query.token) || '').trim();
     const rawEmail = emailForStripe(rawIn);
-    const displayEmail = normalizeEmail(rawIn); // for response shape only
-    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false, email: '' });
-
-    const premium = await hasActiveOrTrialingStripe(rawEmail);
-    return res.json({ premium: !!premium, email: displayEmail });
+    const displayEmail = normalizeEmail(rawIn);
+    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false, status: 'inactive', email: '', subscription_id: null });
+    // Fetch license record
+    let license = null;
+    if (pool) {
+      try { const { rows } = await pool.query('SELECT email, status, subscription_id, canceled_at, active FROM licenses WHERE email=$1', [normalizeEmail(rawEmail)]); license = rows[0] || null; } catch (_) {}
+    } else {
+      license = mem.licenses.get(normalizeEmail(rawEmail)) || null;
+    }
+    let status = 'inactive';
+    let subscriptionId = null;
+    let canceledAt = null;
+    let premium = false;
+    let debug = { buildHash: BUILD_HASH, source: 'license_row', stripeLookup: 'skipped', licenseRowPresent: !!license, licenseRowUpdatedAt: null };
+    if (license && license.subscription_id && ['active','trialing','past_due'].includes(license.status)) {
+      status = license.status;
+      subscriptionId = license.subscription_id;
+      canceledAt = license.canceled_at ? new Date(license.canceled_at).toISOString() : null;
+      premium = true;
+      debug.source = 'license_row';
+      debug.licenseRowUpdatedAt = license.activated_at || null;
+    } else if (stripe) {
+      const lookup = await stripeFindBestSubscription(rawEmail);
+      debug.source = 'stripe_fallback';
+      debug.lookup = lookup;
+      if (lookup.found) {
+        status = lookup.status;
+        subscriptionId = lookup.subscription_id;
+        canceledAt = lookup.canceled_at || null;
+        if (['active','trialing','past_due'].includes(status)) premium = true;
+        await upsertLicenseSubscription({ email: rawEmail, subscriptionId, status });
+      }
+    }
+    if (process.env.NODE_ENV !== 'production') {
+      console.info('[status] resp', { email: displayEmail, status, premium, subscriptionId, debug });
+    }
+    return res.json({ premium, status, email: displayEmail, subscription_id: subscriptionId, canceled_at: canceledAt, debug });
   } catch (err) {
     console.error('Status error:', err);
-    return res.json({ premium: false, email: '' });
+    return res.json({ premium: false, status: 'inactive', email: '', subscription_id: null });
+  } finally {
+    const ms = Date.now() - t0; if (ms > 1900) console.warn('[status] slow', ms);
   }
 });
 
 // GET /status-by-email?email=...
 // Returns JSON { premium: boolean }
 app.get('/status-by-email', async (req, res) => {
+  const t0 = Date.now();
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
   try {
     const rawIn = String(req.query.email || '');
     const rawEmail = emailForStripe(rawIn);
-    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false });
-    const premium = await hasActiveOrTrialingStripe(rawEmail);
-    return res.json({ premium: !!premium });
+    const norm = normalizeEmail(rawIn);
+    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false, status: 'inactive', email: '', subscription_id: null });
+    let license = null;
+    if (pool) {
+      try { const { rows } = await pool.query('SELECT email, status, subscription_id, canceled_at, active FROM licenses WHERE email=$1', [norm]); license = rows[0] || null; } catch (_) {}
+    } else {
+      license = mem.licenses.get(norm) || null;
+    }
+    let status = 'inactive';
+    let subscriptionId = null;
+    let canceledAt = null;
+    let premium = false;
+    let debug = { buildHash: BUILD_HASH, source: 'license_row', stripeLookup: 'skipped', licenseRowPresent: !!license, licenseRowUpdatedAt: null };
+    if (license && license.subscription_id && ['active','trialing','past_due'].includes(license.status)) {
+      status = license.status;
+      subscriptionId = license.subscription_id;
+      canceledAt = license.canceled_at ? new Date(license.canceled_at).toISOString() : null;
+      premium = true;
+      debug.source = 'license_row';
+      debug.licenseRowUpdatedAt = license.activated_at || null;
+    } else if (stripe) {
+      const lookup = await stripeFindBestSubscription(norm);
+      debug.source = 'stripe_fallback';
+      debug.lookup = lookup;
+      if (lookup.found) {
+        status = lookup.status;
+        subscriptionId = lookup.subscription_id;
+        canceledAt = lookup.canceled_at || null;
+        if (['active','trialing','past_due'].includes(status)) premium = true;
+        await upsertLicenseSubscription({ email: norm, subscriptionId, status });
+      }
+    }
+    if (process.env.NODE_ENV !== 'production') console.info('[status-by-email] resp', { email: norm, status, premium, subscriptionId, debug });
+    return res.json({ premium, status, email: norm, subscription_id: subscriptionId, canceled_at: canceledAt, debug });
   } catch (e) {
     console.error('status-by-email error:', e);
-    return res.json({ premium: false });
+    return res.json({ premium: false, status: 'inactive', email: '', subscription_id: null });
+  } finally {
+    const ms = Date.now() - t0; if (ms > 1900) console.warn('[status-by-email] slow', ms);
   }
 });
 
@@ -1523,11 +1731,21 @@ app.post('/lost-code', async (req, res) => {
       return res.status(400).json({ success: false, error: 'invalid_input' });
     }
 
-    // Optional: 1 email/day
-    const last = lostCodeDailyMap.get(email) || 0;
+    // Dev mode detection: NODE_ENV=development or X-Aura-Dev: 1 header
+    const isDev = (String(process.env.NODE_ENV).toLowerCase() === 'development') || (req.headers['x-aura-dev'] === '1');
+    let skipCooldown = false;
+    if (isDev) {
+      skipCooldown = true;
+      console.info('[lost-code] dev bypass for', email);
+    }
+
+    // Optional: 1 email/day (skip in dev)
     const nowMs = Date.now();
-    if (nowMs - last < 24*60*60*1000) {
-      return res.status(429).json({ success: false, error: 'rate_limited' });
+    if (!skipCooldown) {
+      const last = lostCodeDailyMap.get(email) || 0;
+      if (nowMs - last < 24*60*60*1000) {
+        return res.status(429).json({ success: false, error: 'rate_limited' });
+      }
     }
 
     // 1) Reuse purchase subscription check (active or trialing)
@@ -1547,7 +1765,7 @@ app.post('/lost-code', async (req, res) => {
       return res.status(500).json({ success: false, error: 'send_failed' });
     }
 
-    lostCodeDailyMap.set(email, nowMs);
+    if (!skipCooldown) lostCodeDailyMap.set(email, nowMs);
     return res.status(200).json({ success: true });
   } catch (e) {
     console.error('lost-code error', e);

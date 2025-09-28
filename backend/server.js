@@ -1622,11 +1622,13 @@ app.get('/status', async (req, res) => {
         if (['active','trialing','past_due'].includes(status)) premium = true;
         await upsertLicenseSubscription({ email: rawEmail, subscriptionId, status });
       }
+      // Always log fallback attempts for diagnosis
+      console.info('[sw] stripe fallback', { email: displayEmail, attempted: lookup.attempted, customer_count: lookup.customer_count, best_status: lookup.status, best_id: lookup.subscription_id });
     }
     if (process.env.NODE_ENV !== 'production') {
       console.info('[status] resp', { email: displayEmail, status, premium, subscriptionId, debug });
     }
-    return res.json({ premium, status, email: displayEmail, subscription_id: subscriptionId, canceled_at: canceledAt, debug });
+  return res.json({ premium, status, email: displayEmail, subscription_id: subscriptionId, canceled_at: canceledAt, debug });
   } catch (err) {
     console.error('Status error:', err);
     return res.json({ premium: false, status: 'inactive', email: '', subscription_id: null });
@@ -1675,9 +1677,11 @@ app.get('/status-by-email', async (req, res) => {
         if (['active','trialing','past_due'].includes(status)) premium = true;
         await upsertLicenseSubscription({ email: norm, subscriptionId, status });
       }
+      // Always log fallback attempts for diagnosis
+      console.info('[sw] stripe fallback', { email: norm, attempted: lookup.attempted, customer_count: lookup.customer_count, best_status: lookup.status, best_id: lookup.subscription_id });
     }
     if (process.env.NODE_ENV !== 'production') console.info('[status-by-email] resp', { email: norm, status, premium, subscriptionId, debug });
-    return res.json({ premium, status, email: norm, subscription_id: subscriptionId, canceled_at: canceledAt, debug });
+  return res.json({ premium, status, email: norm, subscription_id: subscriptionId, canceled_at: canceledAt, debug });
   } catch (e) {
     console.error('status-by-email error:', e);
     return res.json({ premium: false, status: 'inactive', email: '', subscription_id: null });

@@ -268,6 +268,66 @@ const mem = {
   licenses: new Map(), // email -> { email, plan, active, activated_at }
 };
 
+// Simple file persistence for memory mode so codes survive between admin issuance and redemption
+const STORE_PATH = path.join(__dirname, 'store.json');
+function loadStore() {
+  if (pool) return; // DB mode skip
+  try {
+    if (fs.existsSync(STORE_PATH)) {
+      const raw = fs.readFileSync(STORE_PATH, 'utf8');
+      const data = JSON.parse(raw || '{}');
+      if (data.codes && typeof data.codes === 'object') {
+        for (const [k,v] of Object.entries(data.codes)) {
+          if (!mem.codes.has(k)) {
+            const id = v.id || mem.nextId.code++;
+            mem.codes.set(k, { id, code: k, code_hash: v.code_hash || v.codeHash || null, code_sha256: v.code_sha256 || v.codeSha256 || (k?sha256Hex(k):null), redeemed: !!v.redeemed, note: v.note || '', status: v.status || (v.redeemed? 'used':'active'), created_at: v.created_at || Date.now(), redeemed_at: v.redeemed_at || null, origin: v.origin || '' });
+            mem.nextId.code = Math.max(mem.nextId.code, id+1);
+          }
+        }
+      }
+      if (data.tokens && typeof data.tokens === 'object') {
+        for (const [tok,t] of Object.entries(data.tokens)) {
+          if (!mem.tokens.has(tok)) {
+            const id = t.id || mem.nextId.token++;
+            mem.tokens.set(tok, { id, token: tok, premium: true, created_at: t.created_at || Date.now(), expires_at: t.expires_at || (Date.now()+TOKEN_LIFETIME_MS), revoked: !!t.revoked, code_id: t.code_id || null, email: t.email || '', last_seen_at: t.last_seen_at || null, last_origin: t.last_origin || null, last_agent: t.last_agent || null, last_premium: t.last_premium || null });
+            mem.nextId.token = Math.max(mem.nextId.token, id+1);
+          }
+        }
+      }
+      if (data.licenses && typeof data.licenses === 'object') {
+        for (const [email, lic] of Object.entries(data.licenses)) {
+          mem.licenses.set(email, lic);
+        }
+      }
+      console.info('[MEM] store.json loaded');
+    }
+  } catch (e) {
+    console.warn('[MEM] failed to load store.json', e.message);
+  }
+}
+function saveStoreThrottle() {
+  if (pool) return;
+  if (saveStoreThrottle._t) return; // coalesce bursts
+  saveStoreThrottle._t = setTimeout(()=>{
+    saveStoreThrottle._t = null;
+    try {
+      const out = {
+        codes: {},
+        tokens: {},
+        licenses: Object.fromEntries(mem.licenses.entries())
+      };
+      for (const [code, c] of mem.codes.entries()) {
+        out.codes[code] = { id: c.id, redeemed: c.redeemed, note: c.note, status: c.status, created_at: c.created_at, redeemed_at: c.redeemed_at, origin: c.origin, code_hash: c.code_hash, code_sha256: c.code_sha256 };
+      }
+      for (const [tok, t] of mem.tokens.entries()) {
+        out.tokens[tok] = { id: t.id, created_at: t.created_at, expires_at: t.expires_at, revoked: t.revoked, code_id: t.code_id, email: t.email, last_seen_at: t.last_seen_at, last_origin: t.last_origin, last_agent: t.last_agent, last_premium: t.last_premium };
+      }
+      fs.writeFile(STORE_PATH, JSON.stringify(out, null, 2), (err)=>{ if (err) console.warn('[MEM] save error', err.message); });
+    } catch (e) { console.warn('[MEM] save exception', e.message); }
+  }, 150);
+}
+loadStore();
+
 async function initStorage() {
   if (pool) {
     // Helper to run DDL with clear logs
@@ -471,6 +531,7 @@ async function dbCreateCodes(n, note) {
   mem.codes.set(code, { id, code, code_hash, code_sha256: sha256Hex(code), status: 'active', expires_at: Date.now() + 365*24*60*60*1000, redeemed: false, note: note || '', created_at: nowMs, redeemed_at: null, origin: '' });
       codes.push(code);
     }
+    saveStoreThrottle();
   }
   return codes;
 }
@@ -618,6 +679,7 @@ async function dbRedeem(codeStr, origin, email) {
   mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id, email: (email || '').toLowerCase(), last_seen_at: null, last_premium: null, last_origin: null, last_agent: null });
     const redId = mem.nextId.redemption++;
     mem.redemptions.push({ id: redId, code_id: c.id, token_id: tokenId, origin: origin || '', created_at: nowMs });
+    saveStoreThrottle();
     return { token, premium: true };
   }
 }
@@ -1863,6 +1925,45 @@ app.post('/admin/grant-license', async (req, res) => {
     res.json({ ok: true, code });
   } catch (e) {
     console.error('admin/grant-license error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// GET /admin/debug-code?code=XXXX  (does not redeem; reveals match + state)
+app.get('/admin/debug-code', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  const codeStr = String(req.query.code || '').trim();
+  if (!codeStr) return res.status(400).json({ error: 'missing_code' });
+  try {
+    if (pool) {
+      const fp = sha256Hex(codeStr);
+      const fast = await pool.query('SELECT id, code, code_hash, code_sha256, redeemed, status, note, created_at, redeemed_at FROM public.codes WHERE code=$1 OR code_sha256=$2 LIMIT 5', [codeStr, fp]);
+      let matched = null;
+      for (const r of fast.rows) {
+        let ok = false;
+        if (r.code && r.code === codeStr) ok = true;
+        else if (r.code_hash) ok = await argon2.verify(r.code_hash, codeStr).catch(()=>false);
+        if (ok) { matched = r; break; }
+      }
+      res.json({ matched: !!matched, code: matched ? {
+        id: matched.id,
+        status: matched.status,
+        redeemed: matched.redeemed,
+        note: matched.note,
+        created_at: matched.created_at,
+        redeemed_at: matched.redeemed_at,
+        has_plain: !!matched.code,
+        has_hash: !!matched.code_hash,
+        has_fp: !!matched.code_sha256
+      } : null });
+    } else {
+      const c = mem.codes.get(codeStr) || [...mem.codes.values()].find(v=> v.code_hash ? (async ()=> { try { return await argon2.verify(v.code_hash, codeStr); } catch { return false; } })() : false);
+      // NOTE: We won't asynchronously verify all hashes here for perf; plain match only in memory.
+      if (c) return res.json({ matched: true, code: { id: c.id, status: c.status, redeemed: c.redeemed, note: c.note, created_at: c.created_at, redeemed_at: c.redeemed_at, has_plain: !!c.code, has_hash: !!c.code_hash, has_fp: !!c.code_sha256 } });
+      return res.json({ matched: false });
+    }
+  } catch (e) {
+    console.error('/admin/debug-code error', e);
     res.status(500).json({ error: 'server_error' });
   }
 });

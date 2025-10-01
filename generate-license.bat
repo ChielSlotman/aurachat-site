@@ -9,6 +9,7 @@ set SCRIPT=%~dp0generate-license.pyw
 REM Prefer pythonw (no console window)
 where pythonw >NUL 2>&1
 if %ERRORLEVEL%==0 (
+  set AURASYNC_API_BASE=http://127.0.0.1:3000
   start "AuraSync License Generator" pythonw "%SCRIPT%"
   exit /b 0
 )
@@ -16,6 +17,7 @@ if %ERRORLEVEL%==0 (
 REM Fallback to python
 where python >NUL 2>&1
 if %ERRORLEVEL%==0 (
+  set AURASYNC_API_BASE=http://127.0.0.1:3000
   start "AuraSync License Generator" python "%SCRIPT%"
   exit /b 0
 )
@@ -23,6 +25,7 @@ if %ERRORLEVEL%==0 (
 REM Fallback to py launcher
 where py >NUL 2>&1
 if %ERRORLEVEL%==0 (
+  set AURASYNC_API_BASE=http://127.0.0.1:3000
   start "AuraSync License Generator" py "%SCRIPT%"
   exit /b 0
 )

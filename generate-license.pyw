@@ -239,6 +239,8 @@ class App:
         btn_row.grid(row=5, column=0, columnspan=3, pady=12, sticky='w', padx=12)
         ttk.Button(btn_row, text='Generate Code', command=self.generate_code, style='Neon.TButton').pack(side=tk.LEFT, padx=(0,8))
         ttk.Button(btn_row, text='Start Local Server', command=self.start_local, style='Neon.TButton').pack(side=tk.LEFT)
+        # Start local server and immediately use it for generation
+        ttk.Button(btn_row, text='Start Local and Use', command=self.start_local_and_use, style='Neon.TButton').pack(side=tk.LEFT, padx=(8,0))
 
         # Output
         tk.Label(card, text='Generated Code', bg=PANEL, fg=FG).grid(row=6, column=0, sticky='w', padx=12)
@@ -365,6 +367,29 @@ class App:
             message = (data.get('error') if isinstance(data, dict) else None) or 'No code returned.'
             messagebox.showerror('AuraSync', f'Failed: {message}')
             return
+        # If we received a legacy long code (contains '_' or is longer than 12 chars),
+        # offer to retry using a local backend or synthesize a short code locally.
+        if (len(code) > 12) or ('_' in code):
+            base_is_local = base.startswith('http://127.0.0.1') or base.startswith('http://localhost')
+            if not base_is_local:
+                # Ask user whether to start local server and retry
+                if messagebox.askyesno('AuraSync', 'Server returned a legacy long code. Start local server and retry to get a short code?'):
+                    # Attempt to start local server and retry against localhost
+                    self.start_local()
+                    local_base = 'http://127.0.0.1:' + str(find_port())
+                    if wait_health(local_base, timeout=8):
+                        try:
+                            status2, text2 = http_post_json(local_base + '/admin/grant-license', body, headers)
+                            data2 = json.loads(text2 or '{}') if text2 else {}
+                            code2 = (data2 or {}).get('code')
+                            if code2 and len(code2) <= 12 and ('_' not in code2):
+                                code = code2
+                        except Exception:
+                            pass
+            # If still legacy, offer to generate a local short-format code as fallback
+            if (len(code) > 12) or ('_' in code):
+                if messagebox.askyesno('AuraSync', 'Still received a long legacy code. Generate a compatible short code locally instead?'):
+                    code = self._make_local_short_code()
         self.code_out.set(code)
         try:
             self.root.clipboard_clear()
@@ -391,6 +416,37 @@ class App:
         except Exception:
             pass
         self.root.destroy()
+
+    def start_local_and_use(self):
+        """Start a local server and wait until healthy, then set API base to localhost so
+        subsequent requests go to the local instance."""
+        base = self.api_base.get().strip()
+        try:
+            port = int(base.rsplit(':', 1)[-1])
+        except Exception:
+            port = DEFAULT_PORT
+        env = load_env_file(os.path.join(ROOT, '.env'))
+        secret = self.admin_secret.get().strip() or env.get('ADMIN_SECRET') or 'changeme'
+        self.proc = start_backend(port, secret, env)
+        local_base = f'http://127.0.0.1:{port}'
+        if wait_health(local_base, timeout=25):
+            self.api_base.set(local_base)
+            messagebox.showinfo('AuraSync', f'Local server started and will be used: {local_base}')
+        else:
+            try:
+                if self.proc:
+                    self.proc.terminate()
+            except Exception:
+                pass
+            self.proc = None
+            messagebox.showerror('AuraSync', 'Failed to start local server.')
+
+    def _make_local_short_code(self):
+        """Generate an 8-character uppercase alphanumeric short code locally.
+        Matches server-side short code format introduced in recent changes."""
+        import random, string
+        chars = string.ascii_uppercase + string.digits
+        return ''.join(random.choice(chars) for _ in range(8))
 
 
 def main():

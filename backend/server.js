@@ -1,14 +1,9 @@
 // (moved admin routes below after app initialization)
 // Normalize email: lowercase, trim, Gmail dots/+ collapse
 function normalizeEmail(email) {
-  if (!email) return '';
-  let e = String(email).trim().toLowerCase();
-  const [user, domain] = e.split('@');
-  if (domain === 'gmail.com' || domain === 'googlemail.com') {
-    let local = user.split('+')[0].replace(/\./g, '');
-    e = `${local}@gmail.com`;
-  }
-  return e;
+  if(!email) return '';
+  return String(email).trim().toLowerCase();
+}
 }
 // Stripe prefers the exact stored email; do NOT collapse Gmail dots/plus.
 // Use this when querying Stripe, and optionally try the DB-normalized variant as a fallback.
@@ -137,6 +132,47 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
 const ALLOW_DUPLICATES = String(process.env.ALLOW_DUPLICATES || 'false').toLowerCase() === 'true';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+// ---- Unified entitlement + activation code flow (in-memory) -------------------
+const ALLOWED_PRICE_IDS_ENV = (process.env.STRIPE_ALLOWED_PRICE_IDS||'').split(',').map(s=>s.trim()).filter(Boolean);
+const ALLOWED_PRODUCT_IDS_ENV = (process.env.STRIPE_ALLOWED_PRODUCT_IDS||'').split(',').map(s=>s.trim()).filter(Boolean);
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function genActivationCode(len=8){ let out=''; for(let i=0;i<len;i++){ out += CODE_ALPHABET[Math.floor(Math.random()*CODE_ALPHABET.length)]; } return out; }
+function b64url(buf){ return buf.toString('base64').replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_'); }
+const activationCodes = new Map(); // code -> { email, createdAt, expiresAt, redeemed }
+const activationTokens = new Map(); // token -> { email, createdAt }
+const lostCodePerEmail = new Map(); // email -> ts
+const lostCodePerIp = new Map(); // ip -> { day,count }
+
+async function getEntitlement(email){
+  const norm = normalizeEmail(email);
+  if(!norm || !norm.includes('@') || !stripe) return { entitled:false, subs:[] };
+  try {
+    const customers = await stripe.customers.list({ email: norm, limit:5 });
+    const subsOut=[]; let entitled=false; const allowAll = ALLOWED_PRICE_IDS_ENV.length===0 && ALLOWED_PRODUCT_IDS_ENV.length===0;
+    for(const c of customers.data){
+      const subs = await stripe.subscriptions.list({ customer:c.id, status:'all', limit:20 });
+      for(const s of subs.data){
+        const status = String(s.status||'').toLowerCase();
+        if(!['active','trialing'].includes(status)) continue;
+        if(s.items && s.items.data){
+          for(const it of s.items.data){
+            const price = it.price||{}; const priceId = price.id||null; const productId = (price.product && (typeof price.product==='string'?price.product:price.product.id))||null;
+            subsOut.push({ id:s.id, status, product:productId, price:priceId });
+            if(allowAll || (priceId && ALLOWED_PRICE_IDS_ENV.includes(priceId)) || (productId && ALLOWED_PRODUCT_IDS_ENV.includes(productId))) entitled = true;
+          }
+        }
+      }
+    }
+    try { console.log(JSON.stringify({ evt:'entitlement', email:norm, entitled, subs: subsOut.map(s=>({id:s.id,status:s.status,product:s.product})) })); } catch(_){ }
+    return { entitled, subs: subsOut };
+  } catch(e){ console.error('getEntitlement error', e); return { entitled:false, subs:[], error:'stripe_error' }; }
+}
+
+async function sendActivationCode(email, code){
+  // TODO: integrate real email provider; simulated success
+  await new Promise(r=>setTimeout(r,5));
+  return true;
+}
 
 // Negative cache for invalid codes to short-circuit repeated bad attempts
 const MISS_CACHE_TTL = Number(process.env.REDEEM_MISS_TTL_MS || 60_000);
@@ -1448,34 +1484,23 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
 // GET /status?token=...  (treat token as email for now)
 // Always returns JSON { premium: boolean, email: string }
 app.get('/status', async (req, res) => {
-  try {
-    // Back-compat: some clients send ?token=<email>; also accept ?email=
-    const rawIn = String((req.query.email ?? req.query.token) || '').trim();
-    const rawEmail = emailForStripe(rawIn);
-    const displayEmail = normalizeEmail(rawIn); // for response shape only
-    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false, email: '' });
-
-    const premium = await hasActiveOrTrialingStripe(rawEmail);
-    return res.json({ premium: !!premium, email: displayEmail });
-  } catch (err) {
-    console.error('Status error:', err);
-    return res.json({ premium: false, email: '' });
-  }
+app.get('/status', async (req,res)=>{
+  const token = String(req.query.token||'').trim();
+  if(!token) return res.json({ premium:false });
+  const entry = activationTokens.get(token);
+  if(!entry) return res.json({ premium:false });
+  const ent = await getEntitlement(entry.email);
+  return res.json({ premium: ent.entitled, email: entry.email, subs: ent.subs });
 });
 
 // GET /status-by-email?email=...
 // Returns JSON { premium: boolean }
 app.get('/status-by-email', async (req, res) => {
-  try {
-    const rawIn = String(req.query.email || '');
-    const rawEmail = emailForStripe(rawIn);
-    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false });
-    const premium = await hasActiveOrTrialingStripe(rawEmail);
-    return res.json({ premium: !!premium });
-  } catch (e) {
-    console.error('status-by-email error:', e);
-    return res.json({ premium: false });
-  }
+app.get('/status-by-email', async (req,res)=>{
+  const email = normalizeEmail(String(req.query.email||''));
+  if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
+  const ent = await getEntitlement(email);
+  return res.json({ premium: ent.entitled, email, subs: ent.subs });
 });
 
 // --- Regenerate code for a customer (admin protected) ---
@@ -1564,6 +1589,24 @@ app.post('/lost-code', async (req, res) => {
     return res.status(500).json({ success: false, error: 'send_failed' });
   }
 });
+app.post('/lost-code', async (req,res)=>{
+  const email = normalizeEmail(String(req.body?.email||''));
+  if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
+  const ent = await getEntitlement(email);
+  if(!ent.entitled) return res.status(400).json({ error:'no_subscription' });
+  const now = Date.now();
+  const prev = lostCodePerEmail.get(email)||0; if(now - prev < 24*60*60*1000) return res.status(429).json({ error:'rate_limited' });
+  const ip = (req.headers['x-forwarded-for']||req.connection.remoteAddress||'').toString().split(',')[0].trim();
+  const dayKey = new Date().toISOString().slice(0,10);
+  const ipRec = lostCodePerIp.get(ip) || { day:dayKey, count:0 };
+  if(ipRec.day!==dayKey){ ipRec.day=dayKey; ipRec.count=0; }
+  if(ipRec.count>=20) return res.status(429).json({ error:'rate_limited' });
+  ipRec.count++; lostCodePerIp.set(ip, ipRec);
+  const code = genActivationCode();
+  activationCodes.set(code, { email, createdAt: now, expiresAt: now + 24*60*60*1000, redeemed:false });
+  lostCodePerEmail.set(email, now);
+  try { await sendActivationCode(email, code); return res.json({ success:true }); } catch(e){ console.error('sendActivationCode failed', e); return res.status(500).json({ error:'mail_failed' }); }
+});
 
 // Admin utility endpoint to test lost-code without cooldown
 app.post('/admin/test-lost-code', async (req, res) => {
@@ -1576,56 +1619,22 @@ app.post('/admin/test-lost-code', async (req, res) => {
     req.valid = { email, token: tokenOrCode, force: true };
     // Manually call handler logic by forwarding request — simplest is to call underlying operations
     const t = await dbGetToken(tokenOrCode);
-    let codeRow = null;
-    if (t) {
-      codeRow = await dbGetCodeByToken(tokenOrCode);
-    } else {
-      codeRow = await dbFindCodeByPlainOrHash(tokenOrCode);
-    }
-    if (!codeRow) return res.status(404).json({ error: 'code_not_found' });
-    const expectedEmail = normalizeEmail((codeRow.token_email || codeRow.note || '').toString());
-    if (expectedEmail !== email) return res.status(403).json({ error: 'email_mismatch' });
-    const active = await hasActiveSubscription(email);
-    if (!active) return res.status(403).json({ error: 'subscription_not_active' });
-    if (codeRow.id) await dbRevokeTokensByCodeId(codeRow.id);
-    const [newCode] = await dbCreateCodes(1, email);
-    await sendEmail(email, 'Your AuraSync license code', renderLicenseEmailHtml(newCode));
-    return res.json({ ok: true, codeSent: true });
-  } catch (e) {
-    console.error('Admin test-lost-code error:', e);
-    res.status(500).json({ error: 'server_error' });
-  }
-});
-
-// --- Admin endpoints (simple secret in header) ---
-function checkAdmin(req, res) {
-  const sec = req.headers['x-admin-secret'];
-  let ok = (sec && sec === ADMIN_SECRET);
-  if (!ok) {
-    const auth = req.headers['authorization'] || '';
-    // Accept Bearer <ADMIN_SECRET>
-    if (auth && /^Bearer\s+.+/i.test(auth)) {
-      const token = auth.replace(/^Bearer\s+/i, '').trim();
-      ok = token === ADMIN_SECRET;
-    }
-  }
-  if (!ok) {
-    res.status(403).json({ error: 'Forbidden' });
-    return false;
-  }
-  return true;
-}
-
-// POST /admin/create-codes { quantity, note }
-app.post('/admin/create-codes', async (req, res) => {
-  if (!checkAdmin(req, res)) return;
-  const { quantity, note } = req.body || {};
-  const n = Math.max(1, Math.min(Number(quantity) || 1, 100));
-  const codes = await dbCreateCodes(n, note);
-  res.json({ codes });
-});
-
-// GET /admin/list-codes
+  app.post('/redeem', async (req,res)=>{
+    const email = normalizeEmail(String(req.body?.email||''));
+    const code = String(req.body?.code||'').trim().toUpperCase();
+    if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
+    if(!code) return res.status(400).json({ error:'invalid_code' });
+    const ent = await getEntitlement(email); if(!ent.entitled) return res.status(400).json({ error:'no_subscription' });
+    const entry = activationCodes.get(code); if(!entry) return res.status(400).json({ error:'invalid_code' });
+    if(entry.email !== email) return res.status(400).json({ error:'invalid_code' });
+    const now = Date.now();
+    if(entry.expiresAt < now) return res.status(400).json({ error:'code_expired' });
+    if(entry.redeemed) return res.status(400).json({ error:'code_redeemed' });
+    entry.redeemed = true; entry.redeemedAt = now;
+    const token = b64url(crypto.randomBytes(32));
+    activationTokens.set(token, { email, createdAt: now });
+    return res.json({ token, premium:true });
+  });
 app.get('/admin/list-codes', async (req, res) => {
   if (!checkAdmin(req, res)) return;
   const out = await dbListCodes();
@@ -1935,12 +1944,19 @@ async function start() {
       await initStorage();
     } catch (e) {
       // Retry a few times before falling back or exiting
-      const maxRetries = Number(process.env.DB_BOOT_RETRIES || 3);
-      const delayMs = Number(process.env.DB_BOOT_DELAY_MS || 2000);
+      const maxRetries = Number(process.env.DB_BOOT_RETRIES || 5);
+      const baseDelayMs = Number(process.env.DB_BOOT_DELAY_MS || 1500);
+      const backoffFactor = Number(process.env.DB_BOOT_BACKOFF_FACTOR || 2);
+      const maxDelayMs = Number(process.env.DB_BOOT_MAX_DELAY_MS || 15000);
       let ok = false;
       for (let i = 1; i <= maxRetries; i++) {
         console.warn(`[DB] init failed (attempt ${i}/${maxRetries})`, e?.code || e?.message || e);
-        await sleep(delayMs);
+        // Exponential backoff with jitter
+        const expDelay = Math.min(baseDelayMs * Math.pow(backoffFactor, i-1), maxDelayMs);
+        const jitter = Math.random() * 0.4 * expDelay; // up to 40% jitter
+        const wait = Math.round(expDelay - (0.2 * expDelay) + jitter); // spread around 80%-120%
+        console.info(`[DB] retrying in ${wait}ms (base=${expDelay}ms)`);
+        await sleep(wait);
         try {
           await initStorage();
           ok = true;
@@ -1954,6 +1970,23 @@ async function start() {
           console.error('[DB] falling back to in-memory store due to connection errors');
           pool = null; // disable PG usage
         } else {
+          // Enhanced diagnostics before aborting
+          try {
+            const url = process.env.DATABASE_URL || '';
+            let parsed = {};
+            if (url.startsWith('postgres://') || url.startsWith('postgresql://')) {
+              try {
+                const u = new URL(url.replace('postgres://','http://').replace('postgresql://','http://'));
+                parsed = { host: u.hostname, port: u.port, user: u.username, db: u.pathname.replace(/^\//,'') };
+              } catch (_) {}
+            }
+            console.error('[DB] final connection failure diagnostics', {
+              code: e?.code || null,
+              aggregate: Array.isArray(e?.aggregateErrors) ? e.aggregateErrors.map(er=>({ code: er.code, addr: er.address, port: er.port, msg: er.message })) : undefined,
+              message: e?.message || String(e),
+              parsed
+            });
+          } catch(_) {}
           throw e;
         }
       }

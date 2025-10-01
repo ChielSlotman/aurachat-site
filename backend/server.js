@@ -84,6 +84,18 @@ app.use((req, res, next) => {
   next();
 });
 
+// Admin auth helper (some routes were calling checkAdmin but it was removed in refactor)
+function checkAdmin(req, res) {
+  const supplied = (req.get('X-Admin-Secret') || req.get('x-admin-secret') || '').trim();
+  const ok = supplied && supplied === ADMIN_SECRET;
+  if (!ok) {
+    log.warn({ path: req.path, ip: req.ip }, 'admin_auth_failed');
+    res.status(403).json({ error: 'forbidden' });
+    return false;
+  }
+  return true;
+}
+
 // Zod validation helper
 function validate(schema) {
   return (req, res, next) => {

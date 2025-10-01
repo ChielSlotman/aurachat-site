@@ -503,6 +503,7 @@ async function initStorage() {
 }
 
 function tokenTail(token) { return token ? token.slice(-6) : ''; }
+function codeTail(code) { return code ? code.slice(-6) : ''; }
 
 // --- Storage accessors (DB or memory) ---
 async function dbCreateCodes(n, note) {
@@ -1535,9 +1536,20 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
       return res.status(500).json({ error: 'redeem_failed' });
     }
     const ms = Date.now() - t0;
-    log.info({ ms }, 'redeem_latency');
-    if (result?.error === 'invalid_code') return res.status(400).json({ error: 'invalid_code' });
-    if (result?.error === 'already_used_or_expired') return res.status(400).json({ error: 'already_used_or_expired' });
+    const verbose = String(process.env.REDEEM_VERBOSE_LOG || 'false').toLowerCase() === 'true';
+    if (verbose) {
+      log.info({ ms, code_tail: codeTail(code), email: normEmail || null, result: result?.error ? 'error' : 'ok', error: result?.error || null }, 'redeem_complete');
+    } else {
+      log.info({ ms }, 'redeem_latency');
+    }
+    if (result?.error === 'invalid_code') {
+      if (verbose) log.warn({ code_tail: codeTail(code), email: normEmail || null }, 'redeem_invalid_code');
+      return res.status(400).json({ error: 'invalid_code' });
+    }
+    if (result?.error === 'already_used_or_expired') {
+      if (verbose) log.warn({ code_tail: codeTail(code), email: normEmail || null }, 'redeem_already_used_or_expired');
+      return res.status(400).json({ error: 'already_used_or_expired' });
+    }
     if (!result?.token) return res.status(500).json({ error: 'redeem_failed' });
     return res.json({ token: result.token, premium: true });
   } catch (err) {
@@ -1547,20 +1559,42 @@ app.post('/redeem', validate(RedeemSchema), async (req, res) => {
 });
 
 // GET /status?token=...  (treat token as email for now)
-// Always returns JSON { premium: boolean, email: string }
+// Enhanced: if token param looks like a token we validate it directly first.
+// Returns { premium: boolean, email: string, via: 'token'|'stripe'|'none' }
 app.get('/status', async (req, res) => {
   try {
-    // Back-compat: some clients send ?token=<email>; also accept ?email=
+    const tokenParam = String(req.query.token || '').trim();
+    if (tokenParam && tokenParam.length >= 20 && /[a-f0-9-]{8,}/i.test(tokenParam)) {
+      // Looks like a UUID token – try DB/memory lookup
+      const rec = await dbGetToken(tokenParam);
+      if (rec && !rec.revoked && rec.expires_at > Date.now()) {
+        return res.json({ premium: !!rec.premium, email: (rec.email || ''), via: 'token' });
+      }
+    }
+    // Fallback: treat provided token/email as an email for Stripe subscription check
     const rawIn = String((req.query.email ?? req.query.token) || '').trim();
     const rawEmail = emailForStripe(rawIn);
-    const displayEmail = normalizeEmail(rawIn); // for response shape only
-    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false, email: '' });
-
+    const displayEmail = normalizeEmail(rawIn);
+    if (!rawEmail || !rawEmail.includes('@')) return res.json({ premium: false, email: '', via: 'none' });
     const premium = await hasActiveOrTrialingStripe(rawEmail);
-    return res.json({ premium: !!premium, email: displayEmail });
+    return res.json({ premium: !!premium, email: displayEmail, via: premium ? 'stripe' : 'none' });
   } catch (err) {
     console.error('Status error:', err);
-    return res.json({ premium: false, email: '' });
+    return res.json({ premium: false, email: '', via: 'none' });
+  }
+});
+
+// GET /token-status?token=...  → { premium:boolean, email, revoked:boolean, expires_at:number|null }
+app.get('/token-status', async (req, res) => {
+  try {
+    const token = String(req.query.token || '').trim();
+    if (!token) return res.status(400).json({ error: 'missing_token' });
+    const rec = await dbGetToken(token);
+    if (!rec) return res.json({ premium: false, email: '', revoked: true, expires_at: null });
+    return res.json({ premium: !!rec.premium && !rec.revoked && rec.expires_at > Date.now(), email: rec.email || '', revoked: !!rec.revoked, expires_at: rec.expires_at });
+  } catch (e) {
+    console.error('/token-status error', e);
+    return res.status(500).json({ error: 'server_error' });
   }
 });
 
@@ -1957,8 +1991,16 @@ app.get('/admin/debug-code', async (req, res) => {
         has_fp: !!matched.code_sha256
       } : null });
     } else {
-      const c = mem.codes.get(codeStr) || [...mem.codes.values()].find(v=> v.code_hash ? (async ()=> { try { return await argon2.verify(v.code_hash, codeStr); } catch { return false; } })() : false);
-      // NOTE: We won't asynchronously verify all hashes here for perf; plain match only in memory.
+      let c = mem.codes.get(codeStr);
+      if (!c) {
+        const recent = [...mem.codes.values()].slice(-400).reverse();
+        for (const row of recent) {
+          if (row.code_hash) {
+            let ok=false; try { ok = await argon2.verify(row.code_hash, codeStr); } catch {}
+            if (ok) { c = row; break; }
+          }
+        }
+      }
       if (c) return res.json({ matched: true, code: { id: c.id, status: c.status, redeemed: c.redeemed, note: c.note, created_at: c.created_at, redeemed_at: c.redeemed_at, has_plain: !!c.code, has_hash: !!c.code_hash, has_fp: !!c.code_sha256 } });
       return res.json({ matched: false });
     }

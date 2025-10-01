@@ -2080,6 +2080,10 @@ async function start() {
       let ok = false;
       const errCodes = new Set();
       const firstErr = e;
+      const fastFallback = String(process.env.FAST_DB_FALLBACK || process.env.DB_FAST_FALLBACK || 'false').toLowerCase() === 'true';
+      if (fastFallback && isConnError(e)) {
+        console.warn('[DB] FAST_DB_FALLBACK enabled – skipping retries and using memory');
+      } else {
       for (let i = 1; i <= maxRetries; i++) {
         console.warn(`[DB] init failed (attempt ${i}/${maxRetries})`, e?.code || e?.message || e);
         await sleep(delayMs);
@@ -2091,6 +2095,7 @@ async function start() {
           e = err;
           if (err && err.code) errCodes.add(err.code);
         }
+      }
       }
       if (!ok) {
         // Attempt helpful diagnostics

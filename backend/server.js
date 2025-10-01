@@ -2150,7 +2150,12 @@ async function start() {
       let ok = false;
       const errCodes = new Set();
       const firstErr = e;
-      const fastFallback = String(process.env.FAST_DB_FALLBACK || process.env.DB_FAST_FALLBACK || 'false').toLowerCase() === 'true';
+      // FAST_DB_FALLBACK: when true, skip retry loop and immediately use memory fallback
+      // If not explicitly set, default to true in production to prioritize availability
+      const fastFallbackEnv = (process.env.FAST_DB_FALLBACK || process.env.DB_FAST_FALLBACK);
+      const fastFallback = (fastFallbackEnv != null)
+        ? String(fastFallbackEnv).toLowerCase() === 'true'
+        : (process.env.NODE_ENV === 'production');
       if (fastFallback && isConnError(e)) {
         console.warn('[DB] FAST_DB_FALLBACK enabled – skipping retries and using memory');
       } else {

@@ -1965,11 +1965,21 @@ app.post('/admin/grant-license', async (req, res) => {
   if (!email) return res.status(400).json({ error: 'missing_email' });
   try {
     if (pool) {
-      await pool.query(`
-        INSERT INTO licenses (email, plan, active, activated_at)
-        VALUES ($1, $2, true, NOW())
-        ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
-      `, [email, plan]);
+      try {
+        await pool.query(`
+          INSERT INTO licenses (email, plan, active, activated_at)
+          VALUES ($1, $2, true, NOW())
+          ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
+        `, [email, plan]);
+      } catch (dbErr) {
+        if (isConnError(dbErr)) {
+          console.warn('[ADMIN] DB error in grant-license, falling back to memory');
+          pool = null;
+          mem.licenses.set(email, { email, plan, active: true, activated_at: new Date().toISOString() });
+        } else {
+          throw dbErr;
+        }
+      }
     } else {
       mem.licenses.set(email, { email, plan, active: true, activated_at: new Date().toISOString() });
     }

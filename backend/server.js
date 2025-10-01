@@ -218,18 +218,33 @@ function getPgSsl() {
   }
   return { require: true, rejectUnauthorized: true };
 }
+// --- DB connection bootstrap & fallback controls ---------------------------------
+const SKIP_DB_FLAG = String(process.env.SKIP_DB || process.env.DB_FORCE_MEMORY || 'false').toLowerCase() === 'true' || ['1','yes'].includes(String(process.env.SKIP_DB).toLowerCase());
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
-if (process.env.DATABASE_URL) {
-  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: getPgSsl() });
-  console.info('[DB] using pg with SSL');
+if (!SKIP_DB_FLAG && DATABASE_URL) {
+  const connTimeout = Number(process.env.DB_CONN_TIMEOUT_MS || process.env.PG_CONN_TIMEOUT_MS || 8000);
+  try {
+    pool = new Pool({ connectionString: DATABASE_URL, ssl: getPgSsl(), connectionTimeoutMillis: connTimeout });
+    console.info('[DB] using pg with SSL (timeoutMs=' + connTimeout + ')');
+  } catch (e) {
+    console.error('[DB] failed creating initial Pool object, will fall back to memory', { code: e.code, message: e.message });
+    pool = null;
+  }
+} else if (SKIP_DB_FLAG) {
+  console.warn('[DB] SKIP_DB enabled – forcing in-memory store (NO PERSISTENCE)');
 } else {
-  console.info('[DB] using in-memory store');
+  console.info('[DB] no DATABASE_URL – using in-memory store');
 }
 
-// Fallback controls: allow service to boot using in-memory store if DB is unreachable
-// In production, default to NO fallback (to avoid losing state across instances). In dev, default to true.
-const DB_FALLBACK_ON_FAIL = String(process.env.DB_FALLBACK_ON_FAIL ?? (process.env.NODE_ENV !== 'production' ? 'true' : 'false')).toLowerCase() === 'true';
+// Fallback controls: allow service to boot using in-memory store if DB is unreachable.
+// NEW DEFAULT: Enabled unless explicitly disabled (higher uptime bias after rollback incident).
+// To disable fallback set DB_FALLBACK_ON_FAIL=false.
+const DB_FALLBACK_ON_FAIL = (() => {
+  const v = process.env.DB_FALLBACK_ON_FAIL;
+  if (v != null) return v.toLowerCase() === 'true';
+  return true; // default enabled
+})();
 const FALLBACK_ERROR_CODES = new Set(['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND']);
 function isConnError(err) {
   if (!err) return false;
@@ -1938,6 +1953,8 @@ async function start() {
       const maxRetries = Number(process.env.DB_BOOT_RETRIES || 3);
       const delayMs = Number(process.env.DB_BOOT_DELAY_MS || 2000);
       let ok = false;
+      const errCodes = new Set();
+      const firstErr = e;
       for (let i = 1; i <= maxRetries; i++) {
         console.warn(`[DB] init failed (attempt ${i}/${maxRetries})`, e?.code || e?.message || e);
         await sleep(delayMs);
@@ -1947,13 +1964,27 @@ async function start() {
           break;
         } catch (err) {
           e = err;
+          if (err && err.code) errCodes.add(err.code);
         }
       }
       if (!ok) {
+        // Attempt helpful diagnostics
+        try {
+          const u = new URL(DATABASE_URL);
+          const host = u.hostname;
+          if (host && host.includes('pooler.supabase.com')) {
+            console.warn('[DB] Supabase pooler host detected – if timeouts persist try the direct host from Supabase settings (without "pooler").');
+          }
+        } catch (_) {}
         if (DB_FALLBACK_ON_FAIL && isConnError(e)) {
-          console.error('[DB] falling back to in-memory store due to connection errors');
+          console.error('[DB] falling back to in-memory store due to connection errors', {
+            first_error: firstErr?.code || firstErr?.message,
+            last_error: e?.code || e?.message,
+            error_codes: [...errCodes]
+          });
           pool = null; // disable PG usage
         } else {
+          console.error('[DB] aborting startup (no fallback)', { code: e?.code, message: e?.message });
           throw e;
         }
       }
@@ -1962,6 +1993,9 @@ async function start() {
     console.error('Failed to initialize storage:', e);
     process.exit(1);
     return;
+  }
+  if (!pool) {
+    console.warn('[DB] RUNNING IN MEMORY MODE – all codes/tokens ephemeral. Set DATABASE_URL and (optionally) DB_FALLBACK_ON_FAIL=false to enforce persistent DB.');
   }
   // Lightweight health endpoint for platform checks
   app.get('/health', async (req, res) => {

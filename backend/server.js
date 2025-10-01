@@ -4,7 +4,6 @@ function normalizeEmail(email) {
   if(!email) return '';
   return String(email).trim().toLowerCase();
 }
-}
 // Stripe prefers the exact stored email; do NOT collapse Gmail dots/plus.
 // Use this when querying Stripe, and optionally try the DB-normalized variant as a fallback.
 function emailForStripe(email) {
@@ -96,16 +95,6 @@ function validate(schema) {
 }
 
 const ActivateSchema = z.object({ session_id: z.string().min(10).max(200) });
-const RedeemSchema = z.object({
-  email: z.string().email().optional(),
-  code: z.string().min(8).max(200).transform((s) => s.trim())
-});
-// Legacy lost-code schema (kept for admin/test handler). The public /lost-code route is simplified below.
-const LostCodeSchema = z.object({
-  email: z.string().email(),
-  token: z.string().min(10).max(500),
-  force: z.boolean().optional(),
-});
 
 const PORT = process.env.PORT || 3000;
 const STORE_FILE = path.join(__dirname, 'store.json');
@@ -1428,62 +1417,7 @@ app.post('/billing-portal', validate(BillingSchema), async (req, res) => {
   }
 });
 
-// POST /redeem { code }
-app.post('/redeem', validate(RedeemSchema), async (req, res) => {
-  try {
-    const t0 = Date.now();
-    const { email, code } = req.valid;
-    if (!code) return res.status(400).json({ error: 'missing_code' });
-    const normEmail = email ? normalizeEmail(email) : null;
-    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
-    const REDEEM_WINDOW_MS = 5 * 60 * 1000;
-    const key = `${ip}:${normEmail || code}`;
-    const nowMs = now();
-    // --- Developer master code: infinite use, never expires ---
-    if (DEV_MASTER_CODE && code === DEV_MASTER_CODE) {
-      const token = `dev-${randomUUID()}`;
-      try {
-        if (typeof saveToken === 'function') {
-          await saveToken({ token, code_id: null, origin: req.headers.origin || 'extension', note: 'dev_master', dev: true });
-        }
-      } catch (_) {}
-      return res.json({ token, premium: true, dev: true });
-    }
-    // --- Rate limit ---
-    let arr = rateLimitMap.get(key) || [];
-    arr = arr.filter(ts => nowMs - ts < REDEEM_WINDOW_MS);
-    if (arr.length >= RATE_LIMIT_MAX) {
-      return res.status(429).json({ error: 'Too many attempts, try again later.' });
-    }
-    arr.push(nowMs);
-    rateLimitMap.set(key, arr);
-
-    // Only code is required; email is optional and only used for first-time binding
-    const origin = req.headers.origin || '';
-    let result;
-    try {
-      result = await dbRedeemWithEmailBind({ code, email: normEmail, origin });
-    } catch (e) {
-      log.error({ err: String(e?.message || e) }, 'redeem_failed');
-      const ms = Date.now() - t0;
-      log.info({ ms }, 'redeem_latency');
-      return res.status(500).json({ error: 'redeem_failed' });
-    }
-    const ms = Date.now() - t0;
-    log.info({ ms }, 'redeem_latency');
-    if (result?.error === 'invalid_code') return res.status(400).json({ error: 'invalid_code' });
-    if (result?.error === 'already_used_or_expired') return res.status(400).json({ error: 'already_used_or_expired' });
-    if (!result?.token) return res.status(500).json({ error: 'redeem_failed' });
-    return res.json({ token: result.token, premium: true });
-  } catch (err) {
-    log.error({ err: String(err?.message || err) }, 'redeem_failed');
-    res.status(500).json({ error: 'redeem_failed' });
-  }
-});
-
-// GET /status?token=...  (treat token as email for now)
-// Always returns JSON { premium: boolean, email: string }
-app.get('/status', async (req, res) => {
+// Unified status endpoint (token)
 app.get('/status', async (req,res)=>{
   const token = String(req.query.token||'').trim();
   if(!token) return res.json({ premium:false });
@@ -1493,9 +1427,7 @@ app.get('/status', async (req,res)=>{
   return res.json({ premium: ent.entitled, email: entry.email, subs: ent.subs });
 });
 
-// GET /status-by-email?email=...
-// Returns JSON { premium: boolean }
-app.get('/status-by-email', async (req, res) => {
+// Unified status-by-email endpoint
 app.get('/status-by-email', async (req,res)=>{
   const email = normalizeEmail(String(req.query.email||''));
   if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
@@ -1538,57 +1470,6 @@ app.post('/regenerate', async (req, res) => {
   }
 });
 
-// --- Lost code (minimal): POST /lost-code with { email } ---
-const lostCodeDailyMap = new Map(); // simple per-email 1/day limiter
-app.post('/lost-code', async (req, res) => {
-  try {
-    res.setHeader('Cache-Control', 'no-store');
-    const email = normalizeEmail(String(req.body?.email || ''));
-    if (!email || !email.includes('@')) {
-      return res.status(400).json({ success: false, error: 'invalid_input' });
-    }
-
-    // Dev mode detection: NODE_ENV=development or X-Aura-Dev: 1 header
-    const isDev = (String(process.env.NODE_ENV).toLowerCase() === 'development') || (req.headers['x-aura-dev'] === '1');
-    let skipCooldown = false;
-    if (isDev) {
-      skipCooldown = true;
-      console.info('[lost-code] dev bypass for', email);
-    }
-
-    // Optional: 1 email/day (skip in dev)
-    const nowMs = Date.now();
-    if (!skipCooldown) {
-      const last = lostCodeDailyMap.get(email) || 0;
-      if (nowMs - last < 24*60*60*1000) {
-        return res.status(429).json({ success: false, error: 'rate_limited' });
-      }
-    }
-
-    // 1) Reuse purchase subscription check (active or trialing)
-    const premium = await isActiveSubscriber(email);
-    if (!premium) {
-      return res.status(400).json({ success: false, error: 'no_subscription' });
-    }
-
-    // 2) Reuse purchase code source
-    const code = await getOrCreateLicenseCode(email);
-
-    // 3) Reuse purchase email sender/template
-    try {
-      await sendLicenseEmailSimple(email, code);
-    } catch (e) {
-      console.error('lost-code send error', e);
-      return res.status(500).json({ success: false, error: 'send_failed' });
-    }
-
-    if (!skipCooldown) lostCodeDailyMap.set(email, nowMs);
-    return res.status(200).json({ success: true });
-  } catch (e) {
-    console.error('lost-code error', e);
-    return res.status(500).json({ success: false, error: 'send_failed' });
-  }
-});
 app.post('/lost-code', async (req,res)=>{
   const email = normalizeEmail(String(req.body?.email||''));
   if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
@@ -1613,28 +1494,13 @@ app.post('/admin/test-lost-code', async (req, res) => {
   if (!checkAdmin(req, res)) return;
   try {
     const email = normalizeEmail(String(req.body?.email || ''));
-    const tokenOrCode = String(req.body?.token || req.body?.code || '').trim();
-    if (!email || !tokenOrCode) return res.status(400).json({ error: 'missing_params' });
-    // Simulate lost-code flow with bypass
-    req.valid = { email, token: tokenOrCode, force: true };
-    // Manually call handler logic by forwarding request — simplest is to call underlying operations
-    const t = await dbGetToken(tokenOrCode);
-  app.post('/redeem', async (req,res)=>{
-    const email = normalizeEmail(String(req.body?.email||''));
-    const code = String(req.body?.code||'').trim().toUpperCase();
-    if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
-    if(!code) return res.status(400).json({ error:'invalid_code' });
-    const ent = await getEntitlement(email); if(!ent.entitled) return res.status(400).json({ error:'no_subscription' });
-    const entry = activationCodes.get(code); if(!entry) return res.status(400).json({ error:'invalid_code' });
-    if(entry.email !== email) return res.status(400).json({ error:'invalid_code' });
-    const now = Date.now();
-    if(entry.expiresAt < now) return res.status(400).json({ error:'code_expired' });
-    if(entry.redeemed) return res.status(400).json({ error:'code_redeemed' });
-    entry.redeemed = true; entry.redeemedAt = now;
-    const token = b64url(crypto.randomBytes(32));
-    activationTokens.set(token, { email, createdAt: now });
-    return res.json({ token, premium:true });
-  });
+    const code = genActivationCode();
+    activationCodes.set(code, { email, createdAt: Date.now(), expiresAt: Date.now()+3600_000, redeemed:false });
+    return res.json({ email, code });
+  } catch(e){
+    return res.status(500).json({ error:'internal_error' });
+  }
+});
 app.get('/admin/list-codes', async (req, res) => {
   if (!checkAdmin(req, res)) return;
   const out = await dbListCodes();

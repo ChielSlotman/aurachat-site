@@ -158,9 +158,25 @@ async function getEntitlement(email){
 }
 
 async function sendActivationCode(email, code){
-  // TODO: integrate real email provider; simulated success
-  await new Promise(r=>setTimeout(r,5));
-  return true;
+  if(!email || !code) throw new Error('invalid_params');
+  if(!BREVO_API_KEY || !FROM_EMAIL){
+    console.warn('[EMAIL] activation code email skipped (missing config)');
+    return true; // don't hard-fail if email service not configured
+  }
+  const subject = 'Your AuraSync activation code';
+  const html = `<!doctype html><html><body style="font-family:system-ui,Arial,sans-serif;line-height:1.4">`
+    + `<h2 style="margin:0 0 12px">AuraSync Activation</h2>`
+    + `<p style="margin:0 0 14px">Use this one-time code (valid 24h) to redeem premium:</p>`
+    + `<div style="font-size:20px;letter-spacing:2px;font-weight:700;background:#f4f6ff;border:1px solid #dbe1ff;color:#222;padding:12px 18px;display:inline-block;border-radius:8px">${code}</div>`
+    + `<p style="margin:18px 0 0;font-size:13px;color:#555">If you did not request this code you can ignore this email.</p>`
+    + `</body></html>`;
+  try {
+    await sendEmail(email, subject, html);
+    return true;
+  } catch(e){
+    console.error('sendActivationCode email error', e);
+    throw e;
+  }
 }
 
 // Negative cache for invalid codes to short-circuit repeated bad attempts
@@ -1487,6 +1503,32 @@ app.post('/lost-code', async (req,res)=>{
   activationCodes.set(code, { email, createdAt: now, expiresAt: now + 24*60*60*1000, redeemed:false });
   lostCodePerEmail.set(email, now);
   try { await sendActivationCode(email, code); return res.json({ success:true }); } catch(e){ console.error('sendActivationCode failed', e); return res.status(500).json({ error:'mail_failed' }); }
+});
+
+// Redeem activation code -> token
+// POST /redeem { email, code }
+app.post('/redeem', async (req,res)=>{
+  try {
+    const email = normalizeEmail(String(req.body?.email||''));
+    const code = String(req.body?.code||'').trim().toUpperCase();
+    if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
+    if(!code || code.length < 4) return res.status(400).json({ error:'invalid_code' });
+    const ent = await getEntitlement(email);
+    if(!ent.entitled) return res.status(400).json({ error:'no_subscription' });
+    const entry = activationCodes.get(code);
+    if(!entry) return res.status(400).json({ error:'invalid_code' });
+    if(entry.email !== email) return res.status(400).json({ error:'invalid_code' });
+    const now = Date.now();
+    if(entry.expiresAt < now) return res.status(400).json({ error:'code_expired' });
+    if(entry.redeemed) return res.status(400).json({ error:'code_redeemed' });
+    entry.redeemed = true; entry.redeemedAt = now;
+    const token = b64url(crypto.randomBytes(32));
+    activationTokens.set(token, { email, createdAt: now });
+    return res.json({ token, premium:true });
+  } catch(e){
+    console.error('/redeem error', e);
+    return res.status(500).json({ error:'internal_error' });
+  }
 });
 
 // Admin utility endpoint to test lost-code without cooldown

@@ -105,6 +105,10 @@ const RedeemSchema = z.object({
   email: z.string().email().optional(),
   code: z.string().min(8).max(200).transform((s) => s.trim())
 });
+// Redemption scan tuning (supports legacy hashed-only codes beyond recent window)
+const REDEEM_LEGACY_LIMIT = Number(process.env.REDEEM_LEGACY_LIMIT || 3000); // total rows to scan in descending created_at order (recent-first)
+const REDEEM_RECENT_LIMIT = Number(process.env.REDEEM_RECENT_LIMIT || 500);  // first window (kept small for perf)
+const REDEEM_DEEP_SCAN = String(process.env.REDEEM_DEEP_SCAN || 'true').toLowerCase() === 'true';
 // Legacy lost-code schema (kept for admin/test handler). The public /lost-code route is simplified below.
 const LostCodeSchema = z.object({
   email: z.string().email(),
@@ -500,23 +504,43 @@ async function dbRedeem(codeStr, origin, email) {
           if (ok) { c = row; verified = true; }
         }
       }
-      // Legacy fallback: scan limited recent candidates (avoids full table scan)
+      // Legacy fallback: scan recent (configurable) and optionally deeper batches for hashed-only rows missing fingerprint
       if (!c) {
+        const recentLimit = Math.min(REDEEM_RECENT_LIMIT, REDEEM_LEGACY_LIMIT);
         const recent = await q(client, 'sel_recent_candidates', `
           SELECT id, code, code_hash, code_sha256, redeemed, status, expires_at, note
           FROM public.codes
           WHERE (redeemed = FALSE OR status = 'active')
           ORDER BY created_at DESC
-          LIMIT 500
+          LIMIT ${recentLimit}
           FOR UPDATE`);
-        for (const r of recent.rows) {
-          let ok = false;
-          if (r.code && r.code === codeStr) ok = true;
-          else if (r.code_hash) ok = await argon2.verify(r.code_hash, codeStr).catch(() => false);
-          if (ok) { c = r; if (r.code_hash) verified = true; break; }
-        }
-        if (c && !c.code_sha256) {
-          try { await q(client, 'backfill_fp', 'UPDATE public.codes SET code_sha256=$1 WHERE id=$2', [sha256Hex(codeStr), c.id]); } catch (_) {}
+        const tryRows = async (rows, label) => {
+          for (const r of rows) {
+            let ok = false;
+            if (r.code && r.code === codeStr) ok = true;
+            else if (r.code_hash) ok = await argon2.verify(r.code_hash, codeStr).catch(() => false);
+            if (ok) { c = r; if (r.code_hash) verified = true; break; }
+          }
+          if (c && !c.code_sha256) {
+            try { await q(client, 'backfill_fp', 'UPDATE public.codes SET code_sha256=$1 WHERE id=$2', [sha256Hex(codeStr), c.id]); } catch (_) {}
+          }
+        };
+        await tryRows(recent.rows, 'recent');
+        // Deep scan in additional pages only if still not found
+        if (!c && REDEEM_DEEP_SCAN && REDEEM_LEGACY_LIMIT > recentLimit) {
+          const batch = 1000; // compromise between round trips & memory
+          for (let offset = recentLimit; offset < REDEEM_LEGACY_LIMIT && !c; offset += batch) {
+            const remaining = REDEEM_LEGACY_LIMIT - offset;
+            const lim = Math.min(batch, remaining);
+            const page = await q(client, 'sel_deep_candidates', `
+              SELECT id, code, code_hash, code_sha256, redeemed, status, expires_at, note
+              FROM public.codes
+              WHERE (redeemed = FALSE OR status = 'active')
+              ORDER BY created_at DESC
+              OFFSET ${offset} LIMIT ${lim}
+              FOR UPDATE`);
+            await tryRows(page.rows, 'deep');
+          }
         }
       }
       if (!c) { throw new Error('INVALID_CODE'); }

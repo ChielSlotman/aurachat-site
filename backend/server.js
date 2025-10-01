@@ -509,24 +509,42 @@ function codeTail(code) { return code ? code.slice(-6) : ''; }
 async function dbCreateCodes(n, note) {
   const codes = [];
   const nowMs = Date.now();
+  // Short code generator: 8-char unambiguous uppercase (no 0,O,1,I)
+  const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  function generateShortCode() {
+    let out = '';
+    for (let i = 0; i < 8; i++) {
+      out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+    }
+    return out; // e.g. CPVTKCP8
+  }
   if (pool) {
-    for (let i = 0; i < n; i++) {
-      // Secure random raw code; ensure uniqueness against legacy code column for now
-      let raw;
-      while (true) {
-        raw = crypto.randomBytes(16).toString('base64url');
-        const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1', [raw]);
-        if (rows.length === 0) break;
+    try {
+      for (let i = 0; i < n; i++) {
+        let raw;
+        // Ensure uniqueness (loop until absent)
+        while (true) {
+          raw = generateShortCode();
+          const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1', [raw]);
+          if (rows.length === 0) break;
+        }
+        const hash = await argon2.hash(raw);
+        log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
+        await pool.query('INSERT INTO codes (code, code_hash, code_sha256, redeemed, note, created_at, status) VALUES ($1, $2, $3, FALSE, $4, $5, $6)', [raw, hash, sha256Hex(raw), note || '', nowMs, 'active']);
+        codes.push(raw);
       }
-      const hash = await argon2.hash(raw);
-      log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
-      await pool.query('INSERT INTO codes (code, code_hash, code_sha256, redeemed, note, created_at) VALUES ($1, $2, $3, FALSE, $4, $5)', [raw, hash, sha256Hex(raw), note || '', nowMs]);
-      codes.push(raw);
+    } catch (e) {
+      if (isConnError(e)) {
+        log.error({ err: e.code || e.message }, '[DB] createCodes connection error – switching to memory mode');
+        pool = null; // force memory fallback
+      } else {
+        throw e;
+      }
     }
   } else {
     for (let i = 0; i < n; i++) {
       let code;
-      do { code = crypto.randomBytes(16).toString('base64url'); } while (mem.codes.has(code));
+      do { code = generateShortCode(); } while (mem.codes.has(code));
       const id = mem.nextId.code++;
   const code_hash = await argon2.hash(code);
   mem.codes.set(code, { id, code, code_hash, code_sha256: sha256Hex(code), status: 'active', expires_at: Date.now() + 365*24*60*60*1000, redeemed: false, note: note || '', created_at: nowMs, redeemed_at: null, origin: '' });

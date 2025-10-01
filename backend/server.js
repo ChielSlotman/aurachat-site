@@ -1525,18 +1525,31 @@ app.post('/redeem', async (req,res)=>{
     const code = String(req.body?.code||'').trim().toUpperCase();
     if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
     if(!code || code.length < 4) return res.status(400).json({ error:'invalid_code' });
-    const ent = await getEntitlement(email);
-    if(!ent.entitled) return res.status(400).json({ error:'no_subscription' });
-    const entry = activationCodes.get(code);
-    if(!entry) return res.status(400).json({ error:'invalid_code' });
-    if(entry.email !== email) return res.status(400).json({ error:'invalid_code' });
     const now = Date.now();
-    if(entry.expiresAt < now) return res.status(400).json({ error:'code_expired' });
-    if(entry.redeemed) return res.status(400).json({ error:'code_redeemed' });
-    entry.redeemed = true; entry.redeemedAt = now;
-    const token = b64url(crypto.randomBytes(32));
-    activationTokens.set(token, { email, createdAt: now });
-    return res.json({ token, premium:true });
+    // 1. Short activation code path (8-char style) -------------------------------------------------
+    if(code.length <= 10 && /^[A-Z0-9_\-]+$/.test(code)) {
+      const entry = activationCodes.get(code);
+      if(!entry) return res.status(400).json({ error:'invalid_code' });
+      if(entry.email !== email) return res.status(400).json({ error:'invalid_code' });
+      if(entry.expiresAt < now) return res.status(400).json({ error:'code_expired' });
+      if(entry.redeemed) return res.status(400).json({ error:'code_redeemed' });
+      entry.redeemed = true; entry.redeemedAt = now;
+      const token = b64url(crypto.randomBytes(32));
+      activationTokens.set(token, { email, createdAt: now });
+      return res.json({ token, premium:true, kind:'activation' });
+    }
+    // 2. Legacy long license code path ------------------------------------------------------------
+    // Do NOT require entitlement check first; the code itself proves purchase
+    try {
+      const legacy = await dbRedeemWithEmailBind({ code: req.body?.code, email, origin: req.headers.origin||'' });
+      if(legacy?.token) return res.json({ token: legacy.token, premium:true, kind:'legacy' });
+      if(legacy?.error === 'invalid_code') return res.status(400).json({ error:'invalid_code' });
+      if(legacy?.error === 'already_used_or_expired') return res.status(400).json({ error:'code_redeemed' });
+      return res.status(500).json({ error:'redeem_failed' });
+    } catch(e){
+      console.error('legacy redeem error', e);
+      return res.status(500).json({ error:'internal_error' });
+    }
   } catch(e){
     console.error('/redeem error', e);
     return res.status(500).json({ error:'internal_error' });

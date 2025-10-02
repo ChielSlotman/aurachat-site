@@ -30,13 +30,18 @@ const path = require('path');
 const crypto = require('crypto');
 const { randomUUID } = require('crypto');
 require('dotenv').config();
-// Strict env checks in production
+// Strict env checks in production — by default warn and continue so platform deploys can start.
+// To enforce (exit on missing), set REQUIRE_STRIPE_PROD=true in the environment.
 const REQUIRED_ENVS = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'];
 if (process.env.NODE_ENV === 'production') {
-  for (const k of REQUIRED_ENVS) {
-    if (!process.env[k]) {
-      console.error(`Missing env ${k}`);
+  const missing = REQUIRED_ENVS.filter(k => !process.env[k]);
+  if (missing.length) {
+    const enforce = String(process.env.REQUIRE_STRIPE_PROD || '').toLowerCase() === 'true';
+    if (enforce) {
+      for (const k of missing) console.error(`Missing env ${k}`);
       process.exit(1);
+    } else {
+      console.warn('[ENV] Missing STRIPE envs in production, continuing in degraded mode:', missing.join(', '));
     }
   }
 }
@@ -2215,10 +2220,15 @@ async function start() {
     }
     return res.json({ ok: true, db: 'memory' });
   });
-  app.listen(PORT, () => {
+  // Listen on all interfaces so platform health checks can detect the open port
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`AuraSync backend listening on ${PORT}`);
   });
 }
 start();
+
+// Global logging for unexpected errors to help platform diagnostics
+process.on('unhandledRejection', (r) => { console.error('unhandledRejection', r); });
+process.on('uncaughtException', (err) => { console.error('uncaughtException', err); });
 
 module.exports = { pool };

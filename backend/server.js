@@ -272,6 +272,7 @@ function getPgSsl() {
   return { require: true, rejectUnauthorized: true };
 }
 const DATABASE_URL = process.env.DATABASE_URL || '';
+console.log("[DEBUG] DATABASE_URL =", process.env.DATABASE_URL);
 let pool = null;
 if (process.env.DATABASE_URL) {
   pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: getPgSsl() });

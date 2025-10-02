@@ -230,6 +230,7 @@ function getPgSsl() {
 // --- DB connection bootstrap & fallback controls ---------------------------------
 const SKIP_DB_FLAG = String(process.env.SKIP_DB || process.env.DB_FORCE_MEMORY || 'false').toLowerCase() === 'true' || ['1','yes'].includes(String(process.env.SKIP_DB).toLowerCase());
 const DATABASE_URL = process.env.DATABASE_URL || '';
+console.log("[DEBUG] DATABASE_URL =", process.env.DATABASE_URL);
 let pool = null;
 if (!SKIP_DB_FLAG && DATABASE_URL) {
   const connTimeout = Number(process.env.DB_CONN_TIMEOUT_MS || process.env.PG_CONN_TIMEOUT_MS || 8000);

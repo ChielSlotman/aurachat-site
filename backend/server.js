@@ -505,19 +505,20 @@ async function initStorage() {
 function tokenTail(token) { return token ? token.slice(-6) : ''; }
 function codeTail(code) { return code ? code.slice(-6) : ''; }
 
+// Shared short code generator: 8-char unambiguous uppercase (no 0,O,1,I)
+const SHORT_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function genActivationCode(len = 8) {
+  let out = '';
+  for (let i = 0; i < len; i++) out += SHORT_CODE_ALPHABET[Math.floor(Math.random() * SHORT_CODE_ALPHABET.length)];
+  return out;
+}
+
 // --- Storage accessors (DB or memory) ---
 async function dbCreateCodes(n, note) {
   const codes = [];
   const nowMs = Date.now();
-  // Short code generator: 8-char unambiguous uppercase (no 0,O,1,I)
-  const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  function generateShortCode() {
-    let out = '';
-    for (let i = 0; i < 8; i++) {
-      out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-    }
-    return out; // e.g. CPVTKCP8
-  }
+  // Use shared short code generator
+  function generateShortCode() { return genActivationCode(8); }
   if (pool) {
     try {
       for (let i = 0; i < n; i++) {
@@ -1401,10 +1402,10 @@ async function issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionI
       await client.query('BEGIN');
       // Revoke any current active code for this email to satisfy unique active index
       await client.query("UPDATE public.codes SET status='revoked', revoked_at=NOW() WHERE note=$1 AND status='active'", [email]);
-      // Generate unique code and insert as active
+      // Generate unique short activation code and insert as active
       let raw;
       while (true) {
-        raw = crypto.randomBytes(16).toString('base64url');
+        raw = genActivationCode(8);
         const { rows } = await client.query('SELECT 1 FROM public.codes WHERE code=$1', [raw]);
         if (rows.length === 0) break;
       }

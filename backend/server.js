@@ -22,6 +22,7 @@ const { z } = require('zod');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const net = require('net');
 const { randomUUID } = require('crypto');
 require('dotenv').config();
 // Strict env checks in production
@@ -275,10 +276,24 @@ const DATABASE_URL = process.env.DATABASE_URL || '';
 console.log("[DEBUG] DATABASE_URL =", process.env.DATABASE_URL);
 let pool = null;
 if (process.env.DATABASE_URL) {
-  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: getPgSsl() });
-  console.info('[DB] using pg with SSL');
+  // pool creation moved into initStorage to allow a prior TCP probe and faster fallback when DB is unreachable
+  console.info('[DB] DATABASE_URL present; pool will be created during initStorage');
 } else {
   console.info('[DB] using in-memory store');
+}
+
+// Quick TCP probe: helps detect unreachable DB host before pg-pool attempts long connects
+function tcpProbe(host, port, timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    let done = false;
+    const s = net.createConnection({ host, port }, () => {
+      done = true;
+      try { s.end(); } catch (e) {}
+      resolve(true);
+    });
+    s.on('error', () => { if (!done) { done = true; resolve(false); } });
+    s.setTimeout(timeoutMs, () => { if (!done) { done = true; try { s.destroy(); } catch (e) {} resolve(false); } });
+  });
 }
 
 // Fallback controls: allow service to boot using in-memory store if DB is unreachable
@@ -304,6 +319,35 @@ const mem = {
 };
 
 async function initStorage() {
+  // If DATABASE_URL is present but pool not yet created, attempt to create it now with a TCP probe
+  if (!pool && DATABASE_URL) {
+    try {
+      const u = new URL(DATABASE_URL);
+      const host = u.hostname;
+      const port = Number(u.port) || 5432;
+      const probeOk = await tcpProbe(host, port, Number(process.env.DB_TCP_PROBE_MS || 1500));
+      if (!probeOk) {
+        log.warn({ host, port }, '[DB] tcp probe failed; skipping PG pool creation and using in-memory fallback');
+        if (!DB_FALLBACK_ON_FAIL) {
+          throw new Error('DB_TCP_UNREACHABLE');
+        }
+      } else {
+        const connTimeout = Number(process.env.DB_CONN_TIMEOUT_MS || process.env.PG_CONN_TIMEOUT_MS || 8000);
+        pool = new Pool({ connectionString: DATABASE_URL, ssl: getPgSsl(), connectionTimeoutMillis: connTimeout });
+        log.info('[DB] created pg Pool with timeoutMs=' + connTimeout);
+      }
+    } catch (e) {
+      // If the error is a real connection error and fallback allowed, log and continue with mem
+      if (isConnError(e) || e.message === 'DB_TCP_UNREACHABLE') {
+        log.error({ err: String(e?.message || e) }, '[DB] pool creation failed, falling back to in-memory');
+        pool = null;
+        if (!DB_FALLBACK_ON_FAIL) throw e;
+      } else {
+        throw e;
+      }
+    }
+  }
+
   if (pool) {
     // Helper to run DDL with clear logs
     const run = async (sql, label) => {

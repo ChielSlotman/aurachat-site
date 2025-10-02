@@ -133,7 +133,7 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || '';
 const ALLOW_DUPLICATES = String(process.env.ALLOW_DUPLICATES || 'false').toLowerCase() === 'true';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
-// ---- Unified entitlement + activation code flow (in-memory) -------------------
+// ---- Unified entitlement + activation code flow -------------------
 const ALLOWED_PRICE_IDS_ENV = (process.env.STRIPE_ALLOWED_PRICE_IDS||'').split(',').map(s=>s.trim()).filter(Boolean);
 const ALLOWED_PRODUCT_IDS_ENV = (process.env.STRIPE_ALLOWED_PRODUCT_IDS||'').split(',').map(s=>s.trim()).filter(Boolean);
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -242,7 +242,7 @@ if (ALLOWED_PRICES.length === 0) {
 const DEV_MASTER_CODE = process.env.DEV_MASTER_CODE || '';
 console.info('[DEV] master code enabled?', !!DEV_MASTER_CODE);
 
-// --- Database setup (Postgres with in-memory fallback) ---
+// --- Database setup (Postgres) ---
 // Synchronous SSL helper (CommonJS friendly, no top-level await)
 function getPgSsl() {
   const insecure = (process.env.PG_SSL_INSECURE || '').toLowerCase() === 'true';
@@ -272,38 +272,52 @@ function getPgSsl() {
   return { require: true, rejectUnauthorized: true };
 }
 const DATABASE_URL = process.env.DATABASE_URL || '';
-console.log("[DEBUG] DATABASE_URL =", process.env.DATABASE_URL);
+// Mask DATABASE_URL for logs: show host, port, db only
+let maskedDb = 'none';
+if (DATABASE_URL) {
+  try {
+    const u = new URL(DATABASE_URL.replace(/^postgres:/, 'http:'));
+    maskedDb = `${u.hostname}:${u.port || 5432}/${u.pathname.replace(/^\//, '')}`;
+  } catch (_) { maskedDb = 'invalid'; }
+}
+console.log('[DEBUG] DATABASE =', maskedDb);
 let pool = null;
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
-
-// In-memory fallback store (for local dev when DATABASE_URL is not set)
-const mem = {
-  codes: new Map(), // codeStr -> { id, code, redeemed, note, created_at, redeemed_at, origin }
-  tokens: new Map(), // tokenStr -> { id, token, premium, created_at, expires_at, revoked, code_id }
-  redemptions: [], // { id, code_id, token_id, origin, created_at }
-  nextId: { code: 1, token: 1, redemption: 1 },
-  licenses: new Map(), // email -> { email, plan, active, activated_at }
-};
 
 async function initStorage() {
   // If DATABASE_URL is present but pool not yet created, attempt to create it now with a TCP probe
   // Always initialize pg.Pool and connect immediately. Fail loudly on any error.
   if (!pool) {
-    try {
-      const connTimeout = Number(process.env.DB_CONN_TIMEOUT_MS || process.env.PG_CONN_TIMEOUT_MS || 8000);
-      // Force SSL mode and accept self-signed by disabling rejectUnauthorized (as requested)
-      pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: connTimeout });
-      // Attempt an immediate connection to verify credentials and network
-      const client = await pool.connect();
-      client.release();
-      console.info('✅ Connected to Supabase Postgres');
-      log.info('[DB] created pg Pool and connected successfully (timeoutMs=' + connTimeout + ')');
-    } catch (e) {
-      console.error('❌ Failed to connect to Supabase Postgres');
-      console.error(e);
-      // Fail loudly and stop the process per user instruction
-      process.exit(1);
+    const maxRetries = Number(process.env.DB_CONN_RETRIES || 5);
+    const baseDelay = Number(process.env.DB_CONN_BASE_DELAY_MS || 2000); // 2s
+    const connTimeout = Number(process.env.DB_CONN_TIMEOUT_MS || process.env.PG_CONN_TIMEOUT_MS || 8000);
+    let attempt = 0;
+    for (; attempt < maxRetries; attempt++) {
+      try {
+        log.info({ db: maskedDb, attempt: attempt + 1 }, '[DB] attempting pg Pool creation');
+        pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: connTimeout });
+        // Try to connect immediately
+        const client = await pool.connect();
+        client.release();
+        console.info('✅ Connected to Supabase Postgres');
+        log.info({ db: maskedDb }, '[DB] created pg Pool and connected successfully (timeoutMs=' + connTimeout + ')');
+        break;
+      } catch (err) {
+        console.error(`[DB] Failed to connect to Supabase Postgres on attempt ${attempt + 1} of ${maxRetries}:`, err && err.code ? `${err.code} ${err.message || ''}` : err);
+        // Destroy pool if partially created
+        try { if (pool) await pool.end(); } catch (_) {}
+        pool = null;
+        if (attempt + 1 < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt); // 2s,4s,8s...
+          console.info(`[DB] retrying connection, attempt ${attempt + 2} of ${maxRetries} in ${delay}ms`);
+          await sleep(delay);
+          continue;
+        } else {
+          console.error('[DB] all connection attempts failed; exiting');
+          process.exit(1);
+        }
+      }
     }
   }
 
@@ -476,33 +490,22 @@ async function initStorage() {
 
 function tokenTail(token) { return token ? token.slice(-6) : ''; }
 
-// --- Storage accessors (DB or memory) ---
+// --- Storage accessors (DB) ---
 async function dbCreateCodes(n, note) {
   const codes = [];
   const nowMs = Date.now();
-  if (pool) {
-    for (let i = 0; i < n; i++) {
-      // Secure random raw code; ensure uniqueness against legacy code column for now
-      let raw;
-      while (true) {
-        raw = crypto.randomBytes(16).toString('base64url');
-        const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1', [raw]);
-        if (rows.length === 0) break;
-      }
-      const hash = await argon2.hash(raw);
-      log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
-      await pool.query('INSERT INTO codes (code, code_hash, code_sha256, redeemed, note, created_at) VALUES ($1, $2, $3, FALSE, $4, $5)', [raw, hash, sha256Hex(raw), note || '', nowMs]);
-      codes.push(raw);
+  for (let i = 0; i < n; i++) {
+    // Secure random raw code; ensure uniqueness against legacy code column for now
+    let raw;
+    while (true) {
+      raw = crypto.randomBytes(16).toString('base64url');
+      const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1', [raw]);
+      if (rows.length === 0) break;
     }
-  } else {
-    for (let i = 0; i < n; i++) {
-      let code;
-      do { code = crypto.randomBytes(16).toString('base64url'); } while (mem.codes.has(code));
-      const id = mem.nextId.code++;
-  const code_hash = await argon2.hash(code);
-  mem.codes.set(code, { id, code, code_hash, code_sha256: sha256Hex(code), status: 'active', expires_at: Date.now() + 365*24*60*60*1000, redeemed: false, note: note || '', created_at: nowMs, redeemed_at: null, origin: '' });
-      codes.push(code);
-    }
+    const hash = await argon2.hash(raw);
+    log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
+    await pool.query('INSERT INTO codes (code, code_hash, code_sha256, redeemed, note, created_at) VALUES ($1, $2, $3, FALSE, $4, $5)', [raw, hash, sha256Hex(raw), note || '', nowMs]);
+    codes.push(raw);
   }
   return codes;
 }
@@ -608,7 +611,6 @@ async function dbRedeem(codeStr, origin, email) {
           ON CONFLICT (email)
           DO UPDATE SET active = true, plan = 'premium', activated_at = NOW()
         `, [email.toLowerCase()]);
-        try { mem.licenses.set(normalizeEmail(email), { email: normalizeEmail(email), plan: 'premium', active: true, activated_at: new Date().toISOString() }); } catch(_) {}
       }
       await q(client, 'commit', 'COMMIT');
       return { token, premium: true };
@@ -618,19 +620,6 @@ async function dbRedeem(codeStr, origin, email) {
     } finally {
       client.release();
     }
-  } else {
-    // In-memory fallback
-    const c = mem.codes.get(codeStr);
-    if (!c) return { error: 'invalid_code' };
-    if (c.status && ['used','revoked','expired'].includes(String(c.status))) return { error: 'invalid_code' };
-    if (c.redeemed) return { error: 'invalid_code' };
-    if (c.expires_at && c.expires_at < Date.now()) return { error: 'expired_code' };
-    c.redeemed = true; c.redeemed_at = nowMs; c.origin = origin || ''; try { c.code = null; } catch {}
-    const tokenId = mem.nextId.token++;
-  mem.tokens.set(token, { id: tokenId, token, premium: true, created_at: nowMs, expires_at: expiresAt, revoked: false, code_id: c.id, email: (email || '').toLowerCase(), last_seen_at: null, last_premium: null, last_origin: null, last_agent: null });
-    const redId = mem.nextId.redemption++;
-    mem.redemptions.push({ id: redId, code_id: c.id, token_id: tokenId, origin: origin || '', created_at: nowMs });
-    return { token, premium: true };
   }
 }
 
@@ -656,77 +645,37 @@ async function dbRedeemWithEmailBind({ code, email, origin }) {
 }
 
 async function dbGetToken(tokenStr) {
-  if (pool) {
-    const { rows } = await pool.query('SELECT * FROM tokens WHERE token=$1', [tokenStr]);
-    return rows[0] || null;
-  } else {
-    return mem.tokens.get(tokenStr) || null;
-  }
+  const { rows } = await pool.query('SELECT * FROM tokens WHERE token=$1', [tokenStr]);
+  return rows[0] || null;
 }
 
 async function dbRevokeToken(tokenStr) {
-  if (pool) {
-    const { rowCount } = await pool.query('UPDATE tokens SET revoked=TRUE WHERE token=$1', [tokenStr]);
-    return rowCount > 0;
-  } else {
-    const t = mem.tokens.get(tokenStr);
-    if (!t) return false;
-    t.revoked = true;
-    return true;
-  }
+  const { rowCount } = await pool.query('UPDATE tokens SET revoked=TRUE WHERE token=$1', [tokenStr]);
+  return rowCount > 0;
 }
 
 async function dbRevokeTokensByEmail(email) {
-  if (pool) {
-    await pool.query('UPDATE tokens SET revoked=TRUE WHERE code_id IN (SELECT id FROM codes WHERE note=$1)', [email]);
-  } else {
-    for (const [tok, t] of mem.tokens.entries()) {
-      const c = [...mem.codes.values()].find(c => c.id === t.code_id);
-      if (c && c.note === email) t.revoked = true;
-    }
-  }
+  await pool.query('UPDATE tokens SET revoked=TRUE WHERE code_id IN (SELECT id FROM codes WHERE note=$1)', [email]);
 }
 
 async function dbLatestCodeForEmail(email) {
-  if (pool) {
-    const { rows } = await pool.query('SELECT * FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 1', [email]);
-    return rows[0] || null;
-  } else {
-    const list = [...mem.codes.values()].filter(c => c.note === email).sort((a,b)=> (b.created_at||0)-(a.created_at||0));
-    return list[0] || null;
-  }
+  const { rows } = await pool.query('SELECT * FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 1', [email]);
+  return rows[0] || null;
 }
 
 async function dbRevokeTokensByCodeId(codeId) {
-  if (pool) {
-    await pool.query('UPDATE tokens SET revoked=TRUE WHERE code_id=$1', [codeId]);
-  } else {
-    for (const [, t] of mem.tokens.entries()) {
-      if (t.code_id === codeId) t.revoked = true;
-    }
-  }
+  await pool.query('UPDATE tokens SET revoked=TRUE WHERE code_id=$1', [codeId]);
 }
 
 async function dbGetCodeByToken(tokenStr) {
-  if (pool) {
-    const q = `
-      SELECT c.id, c.code, c.note, c.created_at, t.email as token_email
-      FROM tokens t
-      JOIN codes c ON c.id = t.code_id
-      WHERE t.token = $1
-      LIMIT 1`;
-    const { rows } = await pool.query(q, [tokenStr]);
-    return rows[0] || null;
-  } else {
-    const t = mem.tokens.get(tokenStr);
-    if (!t) return null;
-    for (const c of mem.codes.values()) {
-      if (c.id === t.code_id) {
-        return { id: c.id, code: c.code, note: c.note, created_at: c.created_at, token_email: t.email };
-      }
-    }
-    return null;
-  }
+  const q = `
+    SELECT c.id, c.code, c.note, c.created_at, t.email as token_email
+    FROM tokens t
+    JOIN codes c ON c.id = t.code_id
+    WHERE t.token = $1
+    LIMIT 1`;
+  const { rows } = await pool.query(q, [tokenStr]);
+  return rows[0] || null;
 }
 
 // Subscription helpers
@@ -754,10 +703,6 @@ async function hasActiveSubscription(email) {
       const { rows } = await pool.query('SELECT active FROM licenses WHERE email=$1', [norm]);
       if (rows.length && rows[0].active === true) return true;
     } catch (_) {}
-  } else {
-    // 3) In-memory fallback
-    const lic = mem.licenses.get(norm);
-    if (lic && lic.active) return true;
   }
   return false;
 }
@@ -809,11 +754,6 @@ async function getOrCreateLicenseCode(email) {
       const row = rows[0];
       if (row && row.code) return row.code;
     } catch (_) {}
-  } else {
-    const list = [...mem.codes.values()]
-      .filter(c => normalizeEmail(c.note||'') === norm && (c.status || (c.redeemed ? 'used' : 'active')) === 'active')
-      .sort((a,b)=>Number(b.created_at)-Number(a.created_at));
-    if (list[0]?.code) return list[0].code;
   }
   // Otherwise issue a new one using the same generator used on purchase
   const { code } = await issueLicenseForPlan({ email: norm, plan: 'premium', priceId: null, mode: 'lost-code', subId: null, sessionId: `lost-code:${Date.now()}` });
@@ -828,47 +768,35 @@ async function sendLicenseEmailSimple(email, code) {
 // Helper: find a code row by matching plaintext or verifying code_hash
 async function dbFindCodeByPlainOrHash(codeStr) {
   if (!codeStr) return null;
-  if (pool) {
-    // Try fast paths first
-    let r;
-    r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code=$1 LIMIT 1', [codeStr]);
-    if (r.rows[0]) return r.rows[0];
-    const fp = sha256Hex(codeStr);
-    r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code_sha256=$1 LIMIT 1', [fp]);
-    if (r.rows[0]) {
-      const row = r.rows[0];
-      try {
-        if (row.code_hash && await argon2.verify(row.code_hash, codeStr)) return row;
-      } catch {}
-    }
-    // Fallback scan (rare)
-    const { rows } = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes ORDER BY created_at DESC LIMIT 1000');
-    for (const r of rows) {
-      let ok = false;
-      if (r.code_hash) {
-        try { ok = await argon2.verify(r.code_hash, codeStr); } catch (_) { ok = false; }
-      }
-      if (!ok && r.code) ok = (r.code === codeStr);
-      if (ok) {
-        // backfill missing fingerprint if needed
-        if (!r.code_sha256) {
-          try { await pool.query('UPDATE public.codes SET code_sha256=$1 WHERE id=$2', [sha256Hex(codeStr), r.id]); } catch {}
-        }
-        return r;
-      }
-    }
-    return null;
-  } else {
-    for (const c of mem.codes.values()) {
-      let ok = false;
-      if (c.code_hash) {
-        try { ok = await argon2.verify(c.code_hash, codeStr); } catch (_) { ok = false; }
-      }
-      if (!ok && c.code) ok = (c.code === codeStr);
-      if (ok) return { id: c.id, code: c.code, note: c.note, created_at: c.created_at };
-    }
-    return null;
+  // Query Postgres for matching code (plaintext or hashed)
+  let r;
+  r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code=$1 LIMIT 1', [codeStr]);
+  if (r.rows[0]) return r.rows[0];
+  const fp = sha256Hex(codeStr);
+  r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code_sha256=$1 LIMIT 1', [fp]);
+  if (r.rows[0]) {
+    const row = r.rows[0];
+    try {
+      if (row.code_hash && await argon2.verify(row.code_hash, codeStr)) return row;
+    } catch {}
   }
+  // Fallback scan (rare)
+  const { rows } = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes ORDER BY created_at DESC LIMIT 1000');
+  for (const r2 of rows) {
+    let ok = false;
+    if (r2.code_hash) {
+      try { ok = await argon2.verify(r2.code_hash, codeStr); } catch (_) { ok = false; }
+    }
+    if (!ok && r2.code) ok = (r2.code === codeStr);
+    if (ok) {
+      // backfill missing fingerprint if needed
+      if (!r2.code_sha256) {
+        try { await pool.query('UPDATE public.codes SET code_sha256=$1 WHERE id=$2', [sha256Hex(codeStr), r2.id]); } catch {}
+      }
+      return r2;
+    }
+  }
+  return null;
 }
 
 async function sendEmail(to, subject, html) {
@@ -914,67 +842,36 @@ function renderLicenseEmailHtml(code) {
 }
 
 async function dbListCodes() {
-  if (pool) {
-    const q = `
-      SELECT c.id, c.code, c.redeemed, c.note, c.created_at, c.redeemed_at, c.origin,
-             (
-               SELECT RIGHT(t.token, 6)
-               FROM tokens t
-               WHERE t.code_id = c.id
-               ORDER BY t.created_at DESC
-               LIMIT 1
-             ) AS token_tail
-             ,(
-               SELECT t.email
-               FROM tokens t
-               WHERE t.code_id = c.id
-               ORDER BY t.created_at DESC
-               LIMIT 1
-             ) AS token_email
-      FROM codes c
-      ORDER BY c.created_at DESC`;
-    const { rows } = await pool.query(q);
-    return rows.map(r => ({
-      code: r.code,
-      redeemed: !!r.redeemed,
-      redeemedAt: r.redeemed_at,
-      tokenTail: r.token_tail || '',
-      note: r.note || '',
-      email: (r.token_email || r.note || ''),
-      createdAt: r.created_at,
-      origin: r.origin || ''
-    }));
-  } else {
-    const out = [];
-    for (const [code, c] of mem.codes.entries()) {
-      // find latest token for this code
-      let tail = '';
-      let latestTs = -1;
-      let latestEmail = '';
-      for (const [tok, t] of mem.tokens.entries()) {
-        if (t.code_id === c.id) {
-          tail = tok.slice(-6);
-          if (typeof t.created_at === 'number' && t.created_at > latestTs) {
-            latestTs = t.created_at;
-            latestEmail = t.email || '';
-          }
-        }
-      }
-      out.push({
-        code,
-        redeemed: !!c.redeemed,
-        redeemedAt: c.redeemed_at,
-        tokenTail: tail,
-        note: c.note || '',
-        email: latestEmail || c.note || '',
-        createdAt: c.created_at,
-        origin: c.origin || ''
-      });
-    }
-    // newest first
-    out.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
-    return out;
-  }
+  if (!pool) throw new Error('Postgres not initialized');
+  const q = `
+    SELECT c.id, c.code, c.redeemed, c.note, c.created_at, c.redeemed_at, c.origin,
+           (
+             SELECT RIGHT(t.token, 6)
+             FROM tokens t
+             WHERE t.code_id = c.id
+             ORDER BY t.created_at DESC
+             LIMIT 1
+           ) AS token_tail
+           ,(
+             SELECT t.email
+             FROM tokens t
+             WHERE t.code_id = c.id
+             ORDER BY t.created_at DESC
+             LIMIT 1
+           ) AS token_email
+    FROM codes c
+    ORDER BY c.created_at DESC`;
+  const { rows } = await pool.query(q);
+  return rows.map(r => ({
+    code: r.code,
+    redeemed: !!r.redeemed,
+    redeemedAt: r.redeemed_at,
+    tokenTail: r.token_tail || '',
+    note: r.note || '',
+    email: (r.token_email || r.note || ''),
+    createdAt: r.created_at,
+    origin: r.origin || ''
+  }));
 }
 
 // --- Simple JSON "DB" helpers ---
@@ -1018,11 +915,9 @@ app.get('/healthz', (req, res) => {
 });
 app.get('/health', async (req, res) => {
   try {
-    if (pool) {
-      await pool.query('SELECT 1');
-      return res.json({ ok: true, db: 'pg' });
-    }
-    return res.json({ ok: true, db: 'memory' });
+    if (!pool) return res.status(500).json({ ok: false, error: 'db_not_initialized' });
+    await pool.query('SELECT 1');
+    return res.json({ ok: true, db: 'pg' });
   } catch {
     return res.status(500).json({ ok: false });
   }
@@ -1269,58 +1164,31 @@ app.post('/create-checkout-session', async (req, res) => {
 
 // Idempotency helpers
 async function hasProcessedEvent(id) {
-  if (pool) {
-    const { rows } = await pool.query('SELECT 1 FROM processed_events WHERE id=$1', [id]);
-    return rows.length > 0;
-  } else {
-    if (!mem.processed_events) mem.processed_events = new Set();
-    return mem.processed_events.has(id);
-  }
+  const { rows } = await pool.query('SELECT 1 FROM processed_events WHERE id=$1', [id]);
+  return rows.length > 0;
 }
 async function recordProcessedEvent(id) {
-  if (pool) {
-    await pool.query('INSERT INTO processed_events (id) VALUES ($1) ON CONFLICT DO NOTHING', [id]);
-  } else {
-    if (!mem.processed_events) mem.processed_events = new Set();
-    mem.processed_events.add(id);
-  }
+  await pool.query('INSERT INTO processed_events (id) VALUES ($1) ON CONFLICT DO NOTHING', [id]);
 }
 async function hasPurchase(sessionId) {
-  if (pool) {
-    const { rows } = await pool.query('SELECT 1 FROM purchases WHERE session_id=$1', [sessionId]);
-    if (rows.length === 0) {
-      // Back-compat with old table purchase_events if present
-      try {
-        const r2 = await pool.query('SELECT 1 FROM purchase_events WHERE session_id=$1', [sessionId]);
-        return r2?.rows?.length > 0;
-      } catch {}
-    }
-    return rows.length > 0;
-  } else {
-    if (!mem.purchases) mem.purchases = new Set();
-    return mem.purchases.has(sessionId);
+  const { rows } = await pool.query('SELECT 1 FROM purchases WHERE session_id=$1', [sessionId]);
+  if (rows.length === 0) {
+    // Back-compat with old table purchase_events if present
+    try {
+      const r2 = await pool.query('SELECT 1 FROM purchase_events WHERE session_id=$1', [sessionId]);
+      return r2?.rows?.length > 0;
+    } catch {}
   }
+  return rows.length > 0;
 }
 async function recordPurchase(sessionId, email) {
-  if (pool) {
-    await pool.query('INSERT INTO purchases (session_id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING', [sessionId, email]);
-  } else {
-    if (!mem.purchases) mem.purchases = new Set();
-    mem.purchases.add(sessionId);
-  }
+  await pool.query('INSERT INTO purchases (session_id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING', [sessionId, email]);
 }
 
 // Insert event id once; return true if newly inserted
 async function markProcessedOnce(eventId) {
-  if (pool) {
-    const r = await pool.query('INSERT INTO processed_events (id) VALUES ($1) ON CONFLICT DO NOTHING', [eventId]);
-    return r.rowCount > 0;
-  } else {
-    if (!mem.processed_events) mem.processed_events = new Set();
-    const before = mem.processed_events.size;
-    mem.processed_events.add(eventId);
-    return mem.processed_events.size > before;
-  }
+  const r = await pool.query('INSERT INTO processed_events (id) VALUES ($1) ON CONFLICT DO NOTHING', [eventId]);
+  return r.rowCount > 0;
 }
 
 // Issue a new license for a given plan; returns { code, token }
@@ -1589,27 +1457,7 @@ app.get('/admin/customers', async (req, res) => {
   const q = normalizeEmail(String(req.query?.query || ''));
   try {
     const customers = [];
-    if (!pool) {
-      // memory store: iterate licenses
-      for (const [email, lic] of mem.licenses.entries()) {
-        if (!lic?.active) continue;
-        if (q && !email.includes(q)) continue;
-        const codes = [];
-        const tokens = [];
-        for (const c of mem.codes.values()) {
-          const e = normalizeEmail(c.note || '');
-          if (e === email) codes.push({ id: c.id, created_at: c.created_at, status: c.status || (c.redeemed ? 'used' : 'active') });
-        }
-        for (const [tok, t] of mem.tokens.entries()) {
-          const e = normalizeEmail(t.email || '');
-          if (e === email) tokens.push({ token: tok, revoked: !!t.revoked, created_at: t.created_at, expires_at: t.expires_at, premium: !!t.premium });
-        }
-        codes.sort((a,b)=>Number(b.created_at)-Number(a.created_at));
-        tokens.sort((a,b)=>Number(b.created_at)-Number(a.created_at));
-        customers.push({ email, license: lic, codes: codes.slice(0,10), tokens: tokens.slice(0,10) });
-      }
-      return res.json({ customers });
-    }
+    // Postgres-backed: list active licenses (optionally filtered)
 
     // Postgres-backed: list active licenses (optionally filtered)
     const where = q ? `WHERE active = true AND LOWER(email) LIKE $1` : `WHERE active = true`;
@@ -1644,18 +1492,12 @@ app.get('/admin/customer', async (req, res) => {
   const email = normalizeEmail(String(req.query?.email || ''));
   if (!email) return res.status(400).json({ error: 'missing_email' });
   try{
-    if (pool) {
-      const { rows: lic } = await pool.query('SELECT email, plan, active, activated_at FROM licenses WHERE LOWER(email)=$1', [email]);
-      const license = lic[0] || null;
-      const { rows: codes } = await pool.query('SELECT id, code, code_hash, status, redeemed, created_at, redeemed_at, expires_at FROM codes WHERE note=$1 ORDER BY created_at DESC', [email]);
-      const { rows: tokens } = await pool.query('SELECT token, revoked, premium, created_at, expires_at, last_seen_at, last_origin, last_agent FROM tokens WHERE email=$1 ORDER BY created_at DESC', [email]);
-      return res.json({ email, license, codes, tokens });
-    } else {
-      const license = mem.licenses.get(email) || null;
-      const codes = [...mem.codes.values()].filter(c=>normalizeEmail(c.note||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
-      const tokens = [...mem.tokens.values()].filter(t=>normalizeEmail(t.email||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
-      return res.json({ email, license, codes, tokens });
-    }
+    if (!pool) return res.status(500).json({ error: 'db_not_initialized' });
+    const { rows: lic } = await pool.query('SELECT email, plan, active, activated_at FROM licenses WHERE LOWER(email)=$1', [email]);
+    const license = lic[0] || null;
+    const { rows: codes } = await pool.query('SELECT id, code, code_hash, status, redeemed, created_at, redeemed_at, expires_at FROM codes WHERE note=$1 ORDER BY created_at DESC', [email]);
+    const { rows: tokens } = await pool.query('SELECT token, revoked, premium, created_at, expires_at, last_seen_at, last_origin, last_agent FROM tokens WHERE email=$1 ORDER BY created_at DESC', [email]);
+    return res.json({ email, license, codes, tokens });
   }catch(e){
     console.error('/admin/customer error', e);
     res.status(500).json({ error: 'server_error' });
@@ -1668,6 +1510,7 @@ app.get('/admin/stripe-customers', async (req, res) => {
   if (!checkAdmin(req, res)) return;
   if (!stripe) return res.status(500).json({ error: 'stripe_not_configured' });
   try {
+    if (!pool) return res.status(500).json({ error: 'db_not_initialized' });
     const limit = Math.max(1, Math.min(Number(req.query.limit || 100), 200));
     const map = new Map(); // key: email or customer id if email missing
     const customers = await stripe.customers.list({ limit });
@@ -1706,22 +1549,13 @@ app.get('/admin/stripe-customers', async (req, res) => {
       // Pull codes and tokens (up to 5 for quick view)
       let codes = [], tokens = [], tokenCount = 0, lastSeen = null;
       if (email) {
-        if (pool) {
-          const { rows: codesRows } = await pool.query('SELECT id, created_at, status, expires_at, code FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 5', [email]);
-          codes = codesRows.map(crow=>({ id: crow.id, created_at: Number(crow.created_at), status: crow.status ?? null, expires_at: crow.expires_at ? Number(new Date(crow.expires_at).getTime()) : null, code: crow.code || null, code_tail: crow.code ? crow.code.slice(-6) : null }));
-          const { rows: toksRows } = await pool.query('SELECT token, revoked, created_at, expires_at, last_seen_at FROM tokens WHERE email=$1 ORDER BY created_at DESC LIMIT 5', [email]);
-          tokens = toksRows.map(t=>({ token_tail: (t.token||'').slice(-8), token: t.token, revoked: !!t.revoked, created_at: Number(t.created_at), expires_at: Number(t.expires_at), last_seen_at: t.last_seen_at ? Number(t.last_seen_at) : null }));
-          const { rows: agg } = await pool.query('SELECT COUNT(*)::int AS cnt, MAX(last_seen_at) AS last_seen FROM tokens WHERE email=$1', [email]);
-          tokenCount = (agg?.[0]?.cnt) || 0;
-          lastSeen = agg?.[0]?.last_seen ? Number(agg[0].last_seen) : null;
-        } else {
-          const allCodes = [...mem.codes.values()].filter(x=>normalizeEmail(x.note||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
-          codes = allCodes.slice(0,5).map(crow=>({ id: crow.id, created_at: Number(crow.created_at), status: crow.status ?? (crow.redeemed ? 'used':'active'), expires_at: crow.expires_at || null, code: crow.code || null, code_tail: (crow.code||'').slice(-6) }));
-          const toks = [...mem.tokens.values()].filter(t=>normalizeEmail(t.email||'')===email).sort((a,b)=>Number(b.created_at)-Number(a.created_at));
-          tokens = toks.slice(0,5).map(t=>({ token_tail: (t.token||'').slice(-8), token: t.token, revoked: !!t.revoked, created_at: Number(t.created_at), expires_at: Number(t.expires_at), last_seen_at: t.last_seen_at || null }));
-          tokenCount = toks.length;
-          lastSeen = toks.reduce((m,t)=>Math.max(m, t.last_seen_at||0), 0) || null;
-        }
+        const { rows: codesRows } = await pool.query('SELECT id, created_at, status, expires_at, code FROM codes WHERE note=$1 ORDER BY created_at DESC LIMIT 5', [email]);
+        codes = codesRows.map(crow=>({ id: crow.id, created_at: Number(crow.created_at), status: crow.status ?? null, expires_at: crow.expires_at ? Number(new Date(crow.expires_at).getTime()) : null, code: crow.code || null, code_tail: crow.code ? crow.code.slice(-6) : null }));
+        const { rows: toksRows } = await pool.query('SELECT token, revoked, created_at, expires_at, last_seen_at FROM tokens WHERE email=$1 ORDER BY created_at DESC LIMIT 5', [email]);
+        tokens = toksRows.map(t=>({ token_tail: (t.token||'').slice(-8), token: t.token, revoked: !!t.revoked, created_at: Number(t.created_at), expires_at: Number(t.expires_at), last_seen_at: t.last_seen_at ? Number(t.last_seen_at) : null }));
+        const { rows: agg } = await pool.query('SELECT COUNT(*)::int AS cnt, MAX(last_seen_at) AS last_seen FROM tokens WHERE email=$1', [email]);
+        tokenCount = (agg?.[0]?.cnt) || 0;
+        lastSeen = agg?.[0]?.last_seen ? Number(agg[0].last_seen) : null;
       }
 
       const next = { email, plan, status, current_period_end, price_id: priceId, codes, tokens, tokens_total: tokenCount, last_seen_at: lastSeen };
@@ -1751,15 +1585,12 @@ app.post('/admin/grant-license', async (req, res) => {
   const plan = String(req.body?.plan || 'premium').toLowerCase();
   if (!email) return res.status(400).json({ error: 'missing_email' });
   try {
-    if (pool) {
-      await pool.query(`
-        INSERT INTO licenses (email, plan, active, activated_at)
-        VALUES ($1, $2, true, NOW())
-        ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
-      `, [email, plan]);
-    } else {
-      mem.licenses.set(email, { email, plan, active: true, activated_at: new Date().toISOString() });
-    }
+    if (!pool) return res.status(500).json({ error: 'db_not_initialized' });
+    await pool.query(`
+      INSERT INTO licenses (email, plan, active, activated_at)
+      VALUES ($1, $2, true, NOW())
+      ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
+    `, [email, plan]);
     const [code] = await dbCreateCodes(1, email);
     res.json({ ok: true, code });
   } catch (e) {
@@ -1775,9 +1606,9 @@ app.post('/admin/revoke-email', async (req, res) => {
   const email = normalizeEmail(String(req.body?.email || ''));
   if (!email) return res.status(400).json({ error: 'missing_email' });
   try {
-    await dbRevokeTokensByEmail(email);
-    if (pool) await pool.query(`UPDATE licenses SET active=false WHERE email=$1`, [email]);
-    else if (mem.licenses.has(email)) mem.licenses.get(email).active = false;
+  await dbRevokeTokensByEmail(email);
+  if (!pool) return res.status(500).json({ error: 'db_not_initialized' });
+  await pool.query(`UPDATE licenses SET active=false WHERE email=$1`, [email]);
     res.json({ ok: true });
   } catch (e) {
     console.error('admin/revoke-email error:', e);
@@ -1810,21 +1641,7 @@ app.get('/admin/active-users', async (req, res) => {
       for (const r of rows) {
         out.push({ email: r.email, last_seen_at: Number(r.last_seen_at), premium_hits: Number(r.premium_hits), tokens: Number(r.tokens), token_tails: r.token_tails || [] });
       }
-    } else {
-      const map = new Map();
-      for (const [tok, t] of mem.tokens.entries()) {
-        if (!t.last_seen_at || t.last_seen_at < since) continue;
-        if (!t.last_premium) continue;
-        const email = (t.email || (mem.codes.get(tok)?.note) || '').toLowerCase();
-        if (!email) continue;
-        const cur = map.get(email) || { email, last_seen_at: 0, premium_hits: 0, tokens: 0, token_tails: [] };
-        cur.last_seen_at = Math.max(cur.last_seen_at, t.last_seen_at);
-        cur.premium_hits += 1;
-        cur.tokens += 1;
-        cur.token_tails.push(tok.slice(-6));
-        map.set(email, cur);
-      }
-      out.push(...[...map.values()].sort((a,b)=>b.last_seen_at-a.last_seen_at));
+      // Postgres-only path already handled above
     }
     res.json({ since, hours, users: out });
   } catch (e) {
@@ -1852,16 +1669,6 @@ app.get('/admin/active-extensions', async (req, res) => {
         LIMIT 200`;
       const { rows } = await pool.query(q, [since]);
       return res.json({ since, hours, agents: rows.map(r=>({ origin: r.origin, agent: r.agent, hits: Number(r.hits) })) });
-    } else {
-      const map = new Map();
-      for (const [, t] of mem.tokens.entries()) {
-        if (!t.last_seen_at || t.last_seen_at < since) continue;
-        if (!t.last_premium) continue;
-        const key = `${t.last_origin||'unknown'}|${t.last_agent||'unknown'}`;
-        map.set(key, (map.get(key)||0)+1);
-      }
-      const agents = [...map.entries()].map(([k,v])=>{ const [o,a]=k.split('|'); return { origin:o, agent:a, hits:v }; }).sort((a,b)=>b.hits-a.hits).slice(0,200);
-      return res.json({ since, hours, agents });
     }
   } catch (e) {
     console.error('/admin/active-extensions error', e);

@@ -22,7 +22,6 @@ const { z } = require('zod');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const net = require('net');
 const { randomUUID } = require('crypto');
 require('dotenv').config();
 // Strict env checks in production
@@ -275,38 +274,7 @@ function getPgSsl() {
 const DATABASE_URL = process.env.DATABASE_URL || '';
 console.log("[DEBUG] DATABASE_URL =", process.env.DATABASE_URL);
 let pool = null;
-if (process.env.DATABASE_URL) {
-  // pool creation moved into initStorage to allow a prior TCP probe and faster fallback when DB is unreachable
-  console.info('[DB] DATABASE_URL present; pool will be created during initStorage');
-} else {
-  console.info('[DB] using in-memory store');
-}
 
-// Quick TCP probe: helps detect unreachable DB host before pg-pool attempts long connects
-function tcpProbe(host, port, timeoutMs = 1500) {
-  return new Promise((resolve) => {
-    let done = false;
-    const s = net.createConnection({ host, port }, () => {
-      done = true;
-      try { s.end(); } catch (e) {}
-      resolve(true);
-    });
-    s.on('error', () => { if (!done) { done = true; resolve(false); } });
-    s.setTimeout(timeoutMs, () => { if (!done) { done = true; try { s.destroy(); } catch (e) {} resolve(false); } });
-  });
-}
-
-// Fallback controls: allow service to boot using in-memory store if DB is unreachable
-// In production, default to NO fallback (to avoid losing state across instances). In dev, default to true.
-const DB_FALLBACK_ON_FAIL = String(process.env.DB_FALLBACK_ON_FAIL ?? (process.env.NODE_ENV !== 'production' ? 'true' : 'false')).toLowerCase() === 'true';
-const FALLBACK_ERROR_CODES = new Set(['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND']);
-function isConnError(err) {
-  if (!err) return false;
-  if (err.code && FALLBACK_ERROR_CODES.has(err.code)) return true;
-  const subs = err.aggregateErrors || err.errors || [];
-  for (const e of subs) if (e && e.code && FALLBACK_ERROR_CODES.has(e.code)) return true;
-  return false;
-}
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
 // In-memory fallback store (for local dev when DATABASE_URL is not set)
@@ -320,31 +288,22 @@ const mem = {
 
 async function initStorage() {
   // If DATABASE_URL is present but pool not yet created, attempt to create it now with a TCP probe
-  if (!pool && DATABASE_URL) {
+  // Always initialize pg.Pool and connect immediately. Fail loudly on any error.
+  if (!pool) {
     try {
-      const u = new URL(DATABASE_URL);
-      const host = u.hostname;
-      const port = Number(u.port) || 5432;
-      const probeOk = await tcpProbe(host, port, Number(process.env.DB_TCP_PROBE_MS || 1500));
-      if (!probeOk) {
-        log.warn({ host, port }, '[DB] tcp probe failed; skipping PG pool creation and using in-memory fallback');
-        if (!DB_FALLBACK_ON_FAIL) {
-          throw new Error('DB_TCP_UNREACHABLE');
-        }
-      } else {
-        const connTimeout = Number(process.env.DB_CONN_TIMEOUT_MS || process.env.PG_CONN_TIMEOUT_MS || 8000);
-        pool = new Pool({ connectionString: DATABASE_URL, ssl: getPgSsl(), connectionTimeoutMillis: connTimeout });
-        log.info('[DB] created pg Pool with timeoutMs=' + connTimeout);
-      }
+      const connTimeout = Number(process.env.DB_CONN_TIMEOUT_MS || process.env.PG_CONN_TIMEOUT_MS || 8000);
+      // Force SSL mode and accept self-signed by disabling rejectUnauthorized (as requested)
+      pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: connTimeout });
+      // Attempt an immediate connection to verify credentials and network
+      const client = await pool.connect();
+      client.release();
+      console.info('✅ Connected to Supabase Postgres');
+      log.info('[DB] created pg Pool and connected successfully (timeoutMs=' + connTimeout + ')');
     } catch (e) {
-      // If the error is a real connection error and fallback allowed, log and continue with mem
-      if (isConnError(e) || e.message === 'DB_TCP_UNREACHABLE') {
-        log.error({ err: String(e?.message || e) }, '[DB] pool creation failed, falling back to in-memory');
-        pool = null;
-        if (!DB_FALLBACK_ON_FAIL) throw e;
-      } else {
-        throw e;
-      }
+      console.error('❌ Failed to connect to Supabase Postgres');
+      console.error(e);
+      // Fail loudly and stop the process per user instruction
+      process.exit(1);
     }
   }
 
@@ -511,12 +470,6 @@ async function initStorage() {
       `, 'backfill code_sha256 where plaintext');
     } catch (e) {
       log.warn({ err: String(e?.message || e) }, '[DB] backfill code_sha256 skipped');
-    }
-  } else {
-    // In-memory seed
-    if (!mem.codes.has('DEMO-AURASYNC-1234')) {
-      const id = mem.nextId.code++;
-      mem.codes.set('DEMO-AURASYNC-1234', { id, code: 'DEMO-AURASYNC-1234', redeemed: false, note: '', created_at: Date.now(), redeemed_at: null, origin: '' });
     }
   }
 }
@@ -1944,29 +1897,24 @@ async function start() {
         }
       }
       if (!ok) {
-        if (DB_FALLBACK_ON_FAIL && isConnError(e)) {
-          console.error('[DB] falling back to in-memory store due to connection errors');
-          pool = null; // disable PG usage
-        } else {
-          // Enhanced diagnostics before aborting
-          try {
-            const url = process.env.DATABASE_URL || '';
-            let parsed = {};
-            if (url.startsWith('postgres://') || url.startsWith('postgresql://')) {
-              try {
-                const u = new URL(url.replace('postgres://','http://').replace('postgresql://','http://'));
-                parsed = { host: u.hostname, port: u.port, user: u.username, db: u.pathname.replace(/^\//,'') };
-              } catch (_) {}
-            }
-            console.error('[DB] final connection failure diagnostics', {
-              code: e?.code || null,
-              aggregate: Array.isArray(e?.aggregateErrors) ? e.aggregateErrors.map(er=>({ code: er.code, addr: er.address, port: er.port, msg: er.message })) : undefined,
-              message: e?.message || String(e),
-              parsed
-            });
-          } catch(_) {}
-          throw e;
-        }
+        // Enhanced diagnostics before aborting
+        try {
+          const url = process.env.DATABASE_URL || '';
+          let parsed = {};
+          if (url.startsWith('postgres://') || url.startsWith('postgresql://')) {
+            try {
+              const u = new URL(url.replace('postgres://','http://').replace('postgresql://','http://'));
+              parsed = { host: u.hostname, port: u.port, user: u.username, db: u.pathname.replace(/^\//,'') };
+            } catch (_) {}
+          }
+          console.error('[DB] final connection failure diagnostics', {
+            code: e?.code || null,
+            aggregate: Array.isArray(e?.aggregateErrors) ? e.aggregateErrors.map(er=>({ code: er.code, addr: er.address, port: er.port, msg: er.message })) : undefined,
+            message: e?.message || String(e),
+            parsed
+          });
+        } catch(_) {}
+        throw e;
       }
     }
   } catch (e) {
@@ -1976,15 +1924,12 @@ async function start() {
   }
   // Lightweight health endpoint for platform checks
   app.get('/health', async (req, res) => {
-    if (pool) {
-      try {
-        await pool.query('SELECT 1');
-        return res.json({ ok: true, db: 'pg' });
-      } catch (e) {
-        return res.status(200).json({ ok: true, db: 'pg-error', code: e.code || null });
-      }
+    try {
+      await pool.query('SELECT 1');
+      return res.json({ ok: true, db: 'pg' });
+    } catch (e) {
+      return res.status(500).json({ ok: false, db: 'pg-error', code: e.code || null, message: e.message });
     }
-    return res.json({ ok: true, db: 'memory' });
   });
   app.listen(PORT, () => {
     console.log(`AuraSync backend listening on ${PORT}`);

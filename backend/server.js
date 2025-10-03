@@ -323,9 +323,9 @@ async function initStorage() {
 
   if (pool) {
     // Helper to run DDL with clear logs
-    const run = async (sql, label) => {
+    const run = async (sql, label, params = []) => {
       try {
-        await pool.query(sql);
+        await pool.query(sql, params);
         log.info({ label }, '[DB] bootstrap ok');
       } catch (err) {
         log.error({ err, sql }, `[DB] bootstrap failed: ${label}`);
@@ -448,11 +448,11 @@ async function initStorage() {
             WHERE status = 'active'
           )
           UPDATE public.codes c
-             SET status = 'revoked', revoked_at = NOW()
+             SET status = 'revoked', revoked_at = $1
             FROM ranked r
            WHERE c.id = r.id
              AND r.rn > 1
-        `, 'revoke older active codes per email');
+        `, 'revoke older active codes per email', [Date.now()]);
         await run(`DROP INDEX IF EXISTS codes_active_unique`, 'drop active unique index (retry)');
         await run(`CREATE UNIQUE INDEX IF NOT EXISTS codes_active_unique ON public.codes (note) WHERE status = 'active'`, 'create active unique index (retry)');
       } else {
@@ -499,7 +499,13 @@ async function dbCreateCodes(n, note) {
   // to avoid conflicts with the unique index on active codes per note.
   if (pool && normNote) {
     try {
-      await pool.query("UPDATE public.codes SET status='revoked', revoked_at=NOW() WHERE note=$1 AND status='active'", [normNote]);
+      const revokeMs = Date.now();
+      await pool.query(`
+        UPDATE public.codes
+           SET status = 'revoked',
+               revoked_at = $2
+         WHERE note = $1 AND status = 'active'
+      `, [normNote, revokeMs]);
     } catch (e) {
       log.warn({ err: String(e?.message || e) }, '[DB] revoke_existing_active_codes failed');
     }
@@ -1226,7 +1232,13 @@ async function issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionI
     try {
       await client.query('BEGIN');
       // Revoke any current active code for this email to satisfy unique active index
-      await client.query("UPDATE public.codes SET status='revoked', revoked_at=NOW() WHERE note=$1 AND status='active'", [email]);
+  const revokeMs = Date.now();
+  await client.query(`
+    UPDATE public.codes
+       SET status = 'revoked',
+       revoked_at = $2
+     WHERE note = $1 AND status = 'active'
+  `, [email, revokeMs]);
       // Generate unique code and insert as active
       let raw;
       while (true) {
@@ -1422,10 +1434,18 @@ app.post('/redeem', async (req, res) => {
     const row = pool ? await dbFindCodeByPlainOrHash(code) : null;
     if (!row) return res.status(404).json({ ok: false, reason: 'invalid_code' });
 
+    const nowMs = Date.now();
+
     // Mark the code as redeemed
     try {
       if (pool && row.id) {
-        await pool.query('UPDATE public.codes SET redeemed = TRUE, redeemed_at = NOW() WHERE id = $1', [row.id]);
+        await pool.query(`
+          UPDATE public.codes
+             SET redeemed = TRUE,
+                 redeemed_at = $2,
+                 status = COALESCE(status, 'redeemed')
+           WHERE id = $1
+        `, [row.id, nowMs]);
       }
     } catch (e) {
       console.error('[POST /redeem] error updating redeemed flag', e);
@@ -1436,7 +1456,11 @@ app.post('/redeem', async (req, res) => {
     try {
       const targetEmail = (row.note && String(row.note).trim()) || suppliedEmail;
       if (pool && targetEmail) {
-        await pool.query('UPDATE public.tokens SET last_seen_at = $1 WHERE LOWER(email) = LOWER($2)', [Date.now(), targetEmail]);
+        await pool.query(`
+          UPDATE public.tokens
+             SET last_seen_at = $2
+           WHERE LOWER(email) = LOWER($1)
+        `, [targetEmail, nowMs]);
       }
     } catch (e) {
       console.error('[POST /redeem] error updating last_seen_at', e);
@@ -1680,7 +1704,15 @@ app.post('/admin/grant-license', async (req, res) => {
             if (existing && existing[0]) {
               const old = existing[0];
               replacedOldCode = old.code || null;
-              await pool.query('UPDATE public.codes SET redeemed=TRUE, redeemed_at=$1, status=\'revoked\', revoked_at=NOW(), expires_at=NOW() WHERE id=$2', [Date.now(), old.id]);
+              const revokeMs = Date.now();
+              await pool.query(`
+                UPDATE public.codes
+                   SET redeemed    = TRUE,
+                       redeemed_at = $2,
+                       status      = 'revoked',
+                       revoked_at  = $2
+                 WHERE id = $1
+              `, [old.id, revokeMs]);
               console.info({ email, oldCode: replacedOldCode }, 'admin/grant-license revoked existing active code');
             }
           }

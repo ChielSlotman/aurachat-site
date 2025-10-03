@@ -1433,20 +1433,16 @@ app.get('/status-by-email', async (req,res)=>{
     try {
       const nowMs = Date.now();
       const { rows } = await pool.query(`
-        SELECT t.premium, t.revoked, t.expires_at
+        SELECT 1
           FROM public.tokens t
           LEFT JOIN public.codes c ON c.id = t.code_id
-         WHERE (LOWER(t.email) = LOWER($1))
-            OR (t.email IS NULL AND LOWER(c.note) = LOWER($1))
-      `, [email]);
-      for (const r of rows) {
-        const expires = r.expires_at ? Number(r.expires_at) : null;
-        const expired = typeof expires === 'number' && expires <= nowMs;
-        if (r.premium === true && r.revoked !== true && !expired) {
-          premiumViaToken = true;
-          break;
-        }
-      }
+         WHERE LOWER(COALESCE(t.email, c.note)) = LOWER($1)
+           AND COALESCE(t.premium, TRUE) = TRUE
+           AND COALESCE(t.revoked, FALSE) = FALSE
+           AND (t.expires_at IS NULL OR t.expires_at > $2::bigint)
+         LIMIT 1
+      `, [email, String(nowMs)]);
+      premiumViaToken = rows.length > 0;
     } catch (err) {
       console.error('[status-by-email] token lookup failed', err);
     }

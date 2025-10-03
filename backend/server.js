@@ -495,17 +495,34 @@ async function dbCreateCodes(n, note) {
   const codes = [];
   const nowMs = Date.now();
   for (let i = 0; i < n; i++) {
-    // Secure random raw code; ensure uniqueness against legacy code column for now
+    // Use short, human-friendly activation codes (8 chars) and ensure uniqueness
     let raw;
+    let attempts = 0;
     while (true) {
-      raw = crypto.randomBytes(16).toString('base64url');
-      const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1', [raw]);
+      raw = genActivationCode(8);
+      const { rows } = await pool.query('SELECT 1 FROM codes WHERE code=$1 OR code_sha256=$2 LIMIT 1', [raw, sha256Hex(raw)]);
       if (rows.length === 0) break;
+      attempts += 1;
+      if (attempts > 10) throw new Error('too_many_code_collisions');
     }
     const hash = await argon2.hash(raw);
-    log.info({ params: { code_is_null: raw == null, code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
-    await pool.query('INSERT INTO codes (code, code_hash, code_sha256, redeemed, note, created_at) VALUES ($1, $2, $3, FALSE, $4, $5)', [raw, hash, sha256Hex(raw), note || '', nowMs]);
-    codes.push(raw);
+    log.info({ params: { code_len: raw ? raw.length : null, note: note || '', created_at: nowMs } }, '[DB] insert_code params');
+    // Try insert and handle rare race conditions where unique constraint may fail
+    try {
+      await pool.query('INSERT INTO codes (code, code_hash, code_sha256, redeemed, note, created_at) VALUES ($1, $2, $3, FALSE, $4, $5)', [raw, hash, sha256Hex(raw), note || '', nowMs]);
+      codes.push(raw);
+    } catch (err) {
+      // Unique violation - try another code
+      if (err && err.code === '23505') {
+        log.warn({ err: String(err.message || err), attempt: attempts }, '[DB] code insert collision, retrying');
+        // try again by continuing outer while loop
+        i -= 1; // ensure we still produce n codes
+        continue;
+      }
+      // unexpected DB error - surface for debugging
+      log.error({ err: String(err.message || err) }, '[DB] insert_code failed');
+      throw err;
+    }
   }
   return codes;
 }
@@ -1422,6 +1439,28 @@ app.post('/redeem', async (req,res)=>{
   }
 });
 
+// GET /redeem?code=... -> lookup license info without consuming it
+app.get('/redeem', async (req, res) => {
+  try {
+    const code = String(req.query?.code || '').trim();
+    if (!code) return res.status(400).json({ ok: false, reason: 'missing_code' });
+
+    // Look up the license/code row
+    const row = pool ? await dbFindCodeByPlainOrHash(code) : null;
+    if (!row) return res.status(404).json({ ok: false, reason: 'invalid_code' });
+
+    // Return the public fields requested: plan, email, expires
+    const plan = row.plan || row.note || 'premium';
+    const email = row.note || null;
+    const expires = row.expires_at || row.expiresAt || null;
+
+    return res.json({ ok: true, plan, email, expires });
+  } catch (e) {
+    console.error('[GET /redeem] error', e);
+    return res.status(500).json({ ok: false, reason: 'internal_error' });
+  }
+});
+
 // Admin utility endpoint to test lost-code without cooldown
 app.post('/admin/test-lost-code', async (req, res) => {
   if (!checkAdmin(req, res)) return;
@@ -1586,15 +1625,43 @@ app.post('/admin/grant-license', async (req, res) => {
   if (!email) return res.status(400).json({ error: 'missing_email' });
   try {
     if (!pool) return res.status(500).json({ error: 'db_not_initialized' });
-    await pool.query(`
-      INSERT INTO licenses (email, plan, active, activated_at)
-      VALUES ($1, $2, true, NOW())
-      ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
-    `, [email, plan]);
-    const [code] = await dbCreateCodes(1, email);
-    res.json({ ok: true, code });
+    const maxAttempts = 3;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await pool.query(`
+          INSERT INTO licenses (email, plan, active, activated_at)
+          VALUES ($1, $2, true, NOW())
+          ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
+        `, [email, plan]);
+        const [code] = await dbCreateCodes(1, email);
+        return res.json({ ok: true, code });
+      } catch (e) {
+        lastErr = e;
+        const msg = String(e?.message || e).toLowerCase();
+        // retry on transient network errors
+        if (attempt < maxAttempts && (msg.includes('etimedout') || msg.includes('econnrefused') || String(e?.code||'').toLowerCase().includes('etimedout') || String(e?.code||'').toLowerCase().includes('econnrefused') || e?.name === 'AggregateError')) {
+          const delay = 200 * Math.pow(2, attempt-1);
+          console.warn(`admin/grant-license transient error (attempt ${attempt}/${maxAttempts}): ${String(e?.message||e)} — retrying in ${delay}ms`);
+          await sleep(delay);
+          continue;
+        }
+        break;
+      }
+    }
+    // If we reach here, all attempts failed
+    console.error('admin/grant-license final error after retries:', { message: String(lastErr?.message || lastErr), code: lastErr?.code || null });
+    throw lastErr || new Error('grant_license_failed');
   } catch (e) {
-    console.error('admin/grant-license error:', e);
+    // Log full error for debugging but avoid logging DATABASE_URL
+    console.error('admin/grant-license error:', { message: String(e?.message || e), code: e?.code || null });
+    if (String(e?.message || '').includes('too_many_code_collisions')) {
+      return res.status(500).json({ error: 'code_collision' });
+    }
+    // If ADMIN_DEBUG is enabled, include the error message in the JSON response to help debugging
+    if (process.env.ADMIN_DEBUG === '1') {
+      return res.status(500).json({ error: 'server_error', message: String(e?.message || e) });
+    }
     res.status(500).json({ error: 'server_error' });
   }
 });

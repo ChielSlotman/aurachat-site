@@ -140,7 +140,6 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function genActivationCode(len=8){ let out=''; for(let i=0;i<len;i++){ out += CODE_ALPHABET[Math.floor(Math.random()*CODE_ALPHABET.length)]; } return out; }
 function b64url(buf){ return buf.toString('base64').replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_'); }
 // Ephemeral tracking for rate limits (codes now stored in Postgres)
-const activationTokens = new Map(); // token -> { email, createdAt }
 const lostCodePerEmail = new Map(); // email -> ts
 const lostCodePerIp = new Map(); // ip -> { day,count }
 
@@ -1376,10 +1375,53 @@ app.post('/billing-portal', validate(BillingSchema), async (req, res) => {
 app.get('/status', async (req,res)=>{
   const token = String(req.query.token||'').trim();
   if(!token) return res.json({ premium:false });
-  const entry = activationTokens.get(token);
-  if(!entry) return res.json({ premium:false });
-  const ent = await getEntitlement(entry.email);
-  return res.json({ premium: ent.entitled, email: entry.email, subs: ent.subs });
+  if(!pool) return res.status(500).json({ error:'db_not_initialized' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT token, premium, revoked, expires_at, email, code_id
+        FROM public.tokens
+       WHERE token=$1
+       LIMIT 1
+    `, [token]);
+    const row = rows?.[0] || null;
+    if(!row) return res.json({ premium:false });
+    const nowMs = Date.now();
+    const expiresAt = row.expires_at ? Number(row.expires_at) : null;
+    const isExpired = typeof expiresAt === 'number' && expiresAt <= nowMs;
+    const isPremium = row.premium === true && row.revoked !== true && !isExpired;
+    let email = row.email ? normalizeEmail(row.email) : null;
+    if(!email && row.code_id){
+      try {
+        const { rows: codeRows } = await pool.query('SELECT note FROM public.codes WHERE id=$1 LIMIT 1', [row.code_id]);
+        if(codeRows?.[0]?.note) email = normalizeEmail(codeRows[0].note);
+      } catch (err) {
+        console.error('[status] failed to fetch code note', err);
+      }
+    }
+    // Update last_seen for usage analytics (best effort)
+    try {
+      await pool.query('UPDATE public.tokens SET last_seen_at = $2 WHERE token = $1', [token, nowMs]);
+    } catch (err) {
+      console.error('[status] failed to update last_seen_at', err);
+    }
+    let ent = { entitled: isPremium, subs: [] };
+    if(email){
+      try {
+        ent = await getEntitlement(email);
+      } catch (err) {
+        console.error('[status] entitlement lookup failed', err);
+      }
+    }
+    return res.json({
+      premium: isPremium || ent.entitled,
+      email: email || null,
+      subs: ent.subs || [],
+      expires_at: expiresAt
+    });
+  } catch (err) {
+    console.error('[status] query failed', err);
+    return res.status(500).json({ error:'internal_error' });
+  }
 });
 
 // Unified status-by-email endpoint

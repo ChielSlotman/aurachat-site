@@ -806,10 +806,10 @@ async function dbFindCodeByPlainOrHash(codeStr) {
   if (!codeStr) return null;
   // Query Postgres for matching code (plaintext or hashed)
   let r;
-  r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code=$1 LIMIT 1', [codeStr]);
+  r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at, status, expires_at FROM public.codes WHERE code=$1 LIMIT 1', [codeStr]);
   if (r.rows[0]) return r.rows[0];
   const fp = sha256Hex(codeStr);
-  r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes WHERE code_sha256=$1 LIMIT 1', [fp]);
+  r = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at, status, expires_at FROM public.codes WHERE code_sha256=$1 LIMIT 1', [fp]);
   if (r.rows[0]) {
     const row = r.rows[0];
     try {
@@ -817,7 +817,7 @@ async function dbFindCodeByPlainOrHash(codeStr) {
     } catch {}
   }
   // Fallback scan (rare)
-  const { rows } = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at FROM public.codes ORDER BY created_at DESC LIMIT 1000');
+  const { rows } = await pool.query('SELECT id, code, code_hash, code_sha256, note, created_at, status, expires_at FROM public.codes ORDER BY created_at DESC LIMIT 1000');
   for (const r2 of rows) {
     let ok = false;
     if (r2.code_hash) {
@@ -1425,78 +1425,70 @@ app.post('/lost-code', async (req,res)=>{
   try { await sendActivationCode(email, code); return res.json({ success:true }); } catch(e){ console.error('sendActivationCode failed', e); return res.status(500).json({ error:'mail_failed' }); }
 });
 
-// Redeem activation code (POST) - lookup and mark redeemed
+// Redeem activation code (POST) - issue token and return metadata
 // POST /redeem { email, code }
 app.post('/redeem', async (req, res) => {
   try {
     const code = String(req.body?.code || '').trim();
-    const suppliedEmail = normalizeEmail(String(req.body?.email || '')) || null;
+    const suppliedEmailRaw = String(req.body?.email || '');
+    const suppliedEmail = normalizeEmail(suppliedEmailRaw) || null;
     if (!code) return res.status(400).json({ ok: false, reason: 'missing_code' });
 
-    // Look up the code using the helper
-    const row = pool ? await dbFindCodeByPlainOrHash(code) : null;
-    if (!row) return res.status(404).json({ ok: false, reason: 'invalid_code' });
+    let codeRow = null;
+    if (pool) {
+      try {
+        codeRow = await dbFindCodeByPlainOrHash(code);
+      } catch (e) {
+        console.error('[POST /redeem] error prefetching code row', e);
+      }
+    }
 
+    const redeemResult = await dbRedeemWithEmailBind({ code, email: suppliedEmail, origin: req.headers.origin || '' });
+    if (redeemResult?.error) {
+      if (redeemResult.error === 'invalid_code') {
+        return res.status(404).json({ ok: false, reason: 'invalid_code' });
+      }
+      if (redeemResult.error === 'already_used_or_expired') {
+        return res.status(409).json({ ok: false, reason: 'already_used' });
+      }
+      return res.status(500).json({ ok: false, reason: 'redeem_failed' });
+    }
+
+    const token = redeemResult?.token || null;
     const nowMs = Date.now();
-
-    // Mark the code as redeemed
-    try {
-      if (pool && row.id) {
-        await pool.query(`
-          UPDATE public.codes
-             SET redeemed = TRUE,
-                 redeemed_at = $2,
-                 status = COALESCE(status, 'redeemed')
-           WHERE id = $1
-        `, [row.id, nowMs]);
+    if (pool && token) {
+      try {
+        await pool.query('UPDATE public.tokens SET last_seen_at = $1 WHERE token = $2', [nowMs, token]);
+      } catch (e) {
+        console.error('[POST /redeem] error updating last_seen_at for token', e);
       }
-    } catch (e) {
-      console.error('[POST /redeem] error updating redeemed flag', e);
-      // continue - we still try to respond
     }
 
-    // Update last_seen_at for tokens associated with this email (if provided)
-    try {
-      const targetEmail = (row.note && String(row.note).trim()) || suppliedEmail;
-      if (pool && targetEmail) {
-        await pool.query(`
-          UPDATE public.tokens
-             SET last_seen_at = $2
-           WHERE LOWER(email) = LOWER($1)
-        `, [targetEmail, nowMs]);
-      }
-    } catch (e) {
-      console.error('[POST /redeem] error updating last_seen_at', e);
-    }
+    const effectiveEmail = (codeRow && codeRow.note) ? String(codeRow.note).trim() : suppliedEmail;
 
-    // Fetch any additional fields (expires_at) and license plan if available
-    let expires = null;
-    try {
-      if (pool && row.id) {
-        const { rows } = await pool.query('SELECT expires_at FROM public.codes WHERE id=$1 LIMIT 1', [row.id]);
-        if (rows && rows[0]) expires = rows[0].expires_at || null;
-      }
-    } catch (e) {
-      console.error('[POST /redeem] error fetching expires_at', e);
-    }
-
-    // Determine plan: try licenses table by email, otherwise fall back to row.plan or 'premium'
     let plan = 'premium';
-    try {
-      const licenseEmail = (row.note && String(row.note).trim()) || suppliedEmail;
-      if (pool && licenseEmail) {
-        const { rows } = await pool.query('SELECT plan FROM public.licenses WHERE LOWER(email) = LOWER($1) LIMIT 1', [licenseEmail]);
-        if (rows && rows[0] && rows[0].plan) plan = rows[0].plan;
-        else if (row.plan) plan = row.plan;
-      } else if (row.plan) {
-        plan = row.plan;
+    if (pool && effectiveEmail) {
+      try {
+        const { rows } = await pool.query('SELECT plan FROM public.licenses WHERE LOWER(email)=LOWER($1) LIMIT 1', [effectiveEmail]);
+        if (rows?.[0]?.plan) plan = rows[0].plan;
+      } catch (e) {
+        console.error('[POST /redeem] error fetching plan', e);
       }
-    } catch (e) {
-      console.error('[POST /redeem] error fetching license plan', e);
     }
 
-    const outEmail = (row.note && String(row.note).trim()) || suppliedEmail || null;
-    return res.json({ ok: true, plan, email: outEmail, expires: expires || null });
+    let expires = null;
+    if (codeRow?.expires_at) {
+      expires = codeRow.expires_at;
+    } else if (pool && codeRow?.id) {
+      try {
+        const { rows } = await pool.query('SELECT expires_at FROM public.codes WHERE id=$1 LIMIT 1', [codeRow.id]);
+        if (rows?.[0]?.expires_at) expires = rows[0].expires_at;
+      } catch (e) {
+        console.error('[POST /redeem] error fetching expires_at', e);
+      }
+    }
+
+    return res.json({ ok: true, token, premium: true, plan, email: effectiveEmail || null, expires: expires || null });
   } catch (e) {
     console.error('[POST /redeem] error', e);
     return res.status(500).json({ ok: false, reason: 'internal_error' });
@@ -1513,9 +1505,16 @@ app.get('/redeem', async (req, res) => {
     const row = pool ? await dbFindCodeByPlainOrHash(code) : null;
     if (!row) return res.status(404).json({ ok: false, reason: 'invalid_code' });
 
-    // Return the public fields requested: plan, email, expires
-    const plan = row.plan || row.note || 'premium';
-    const email = row.note || null;
+    const email = row.note ? String(row.note).trim() : null;
+    let plan = 'premium';
+    if (pool && email) {
+      try {
+        const { rows } = await pool.query('SELECT plan FROM public.licenses WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+        if (rows?.[0]?.plan) plan = rows[0].plan;
+      } catch (err) {
+        console.error('[GET /redeem] error fetching plan', err);
+      }
+    }
     const expires = row.expires_at || row.expiresAt || null;
 
     return res.json({ ok: true, plan, email, expires });

@@ -191,11 +191,13 @@ class App:
             pass
 
         env = load_env_file(os.path.join(ROOT, '.env'))
-        self.admin_secret = tk.StringVar(value=env.get('ADMIN_SECRET', ''))
+        # Default testing credentials so you don't have to type them each run
+        self.admin_secret = tk.StringVar(value=env.get('ADMIN_SECRET', '') or 'mick-aurasync')
         # Default to production API; can switch to localhost if desired
         default_base = 'https://api.aurasync.info'
         self.api_base = tk.StringVar(value=default_base)
-        self.email = tk.StringVar()
+        # Prefill a test customer email for convenience
+        self.email = tk.StringVar(value='slotman.chiel@gmail.com')
         self.plan = tk.StringVar(value='premium')
         self.code_out = tk.StringVar(value='')
 

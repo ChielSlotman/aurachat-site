@@ -18,7 +18,8 @@
         </div>
         <div style="margin-top:16px">
           <label class="muted" style="display:block;margin-bottom:6px;font-size:12px">Admin Secret</label>
-          <input id="sec" type="password" placeholder="paste ADMIN_SECRET" style="width:100%">
+          <!-- Default for local testing; change or remove in production -->
+          <input id="sec" type="password" placeholder="paste ADMIN_SECRET" style="width:100%" value="mick-aurasync">
         </div>
       </aside>
       <main class="main">
@@ -44,7 +45,8 @@
           <div class="card half">
             <h3>Grant License</h3>
             <div class="toolbar">
-              <input id="newEmail" placeholder="grant to email">
+              <!-- Default testing email so you don't have to type it repeatedly -->
+              <input id="newEmail" placeholder="grant to email" value="slotman.chiel@gmail.com">
               <select id="plan">
                 <option value="premium">premium</option>
                 <option value="monthly">monthly</option>

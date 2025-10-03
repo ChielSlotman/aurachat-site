@@ -139,7 +139,7 @@ const ALLOWED_PRODUCT_IDS_ENV = (process.env.STRIPE_ALLOWED_PRODUCT_IDS||'').spl
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function genActivationCode(len=8){ let out=''; for(let i=0;i<len;i++){ out += CODE_ALPHABET[Math.floor(Math.random()*CODE_ALPHABET.length)]; } return out; }
 function b64url(buf){ return buf.toString('base64').replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_'); }
-const activationCodes = new Map(); // code -> { email, createdAt, expiresAt, redeemed }
+// Ephemeral tracking for rate limits (codes now stored in Postgres)
 const activationTokens = new Map(); // token -> { email, createdAt }
 const lostCodePerEmail = new Map(); // email -> ts
 const lostCodePerIp = new Map(); // ip -> { day,count }
@@ -189,6 +189,25 @@ async function sendActivationCode(email, code){
     console.error('sendActivationCode email error', e);
     throw e;
   }
+}
+
+async function createDbActivationCode(email, ttlMs) {
+  if (!email) throw new Error('missing_email');
+  const codes = await dbCreateCodes(1, email);
+  const code = codes?.[0] || null;
+  if (!code) throw new Error('code_generation_failed');
+  if (pool && Number.isFinite(ttlMs) && ttlMs > 0) {
+    const expiresAtMs = Date.now() + ttlMs;
+    try {
+      await pool.query(
+        'UPDATE public.codes SET expires_at = to_timestamp($2::double precision / 1000.0) WHERE code_sha256=$1',
+        [sha256Hex(code), expiresAtMs]
+      );
+    } catch (err) {
+      console.error('[activation_code] failed to set expires_at', err);
+    }
+  }
+  return code;
 }
 
 // Negative cache for invalid codes to short-circuit repeated bad attempts
@@ -1407,7 +1426,8 @@ app.post('/regenerate', async (req, res) => {
 });
 
 app.post('/lost-code', async (req,res)=>{
-  const email = normalizeEmail(String(req.body?.email||''));
+  const rawEmail = String(req.body?.email||'').trim();
+  const email = normalizeEmail(rawEmail);
   if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
   const ent = await getEntitlement(email);
   if(!ent.entitled) return res.status(400).json({ error:'no_subscription' });
@@ -1419,10 +1439,18 @@ app.post('/lost-code', async (req,res)=>{
   if(ipRec.day!==dayKey){ ipRec.day=dayKey; ipRec.count=0; }
   if(ipRec.count>=20) return res.status(429).json({ error:'rate_limited' });
   ipRec.count++; lostCodePerIp.set(ip, ipRec);
-  const code = genActivationCode();
-  activationCodes.set(code, { email, createdAt: now, expiresAt: now + 24*60*60*1000, redeemed:false });
+  let code;
+  try {
+    code = await createDbActivationCode(email, 24*60*60*1000);
+  } catch (err) {
+    console.error('[lost-code] failed to create activation code', err);
+    return res.status(500).json({ error:'code_generation_failed' });
+  }
   lostCodePerEmail.set(email, now);
-  try { await sendActivationCode(email, code); return res.json({ success:true }); } catch(e){ console.error('sendActivationCode failed', e); return res.status(500).json({ error:'mail_failed' }); }
+  try {
+    await sendActivationCode(rawEmail || email, code);
+    return res.json({ success:true });
+  } catch(e){ console.error('sendActivationCode failed', e); return res.status(500).json({ error:'mail_failed' }); }
 });
 
 // Redeem activation code (POST) - issue token and return metadata
@@ -1529,8 +1557,8 @@ app.post('/admin/test-lost-code', async (req, res) => {
   if (!checkAdmin(req, res)) return;
   try {
     const email = normalizeEmail(String(req.body?.email || ''));
-    const code = genActivationCode();
-    activationCodes.set(code, { email, createdAt: Date.now(), expiresAt: Date.now()+3600_000, redeemed:false });
+    if (!email) return res.status(400).json({ error: 'missing_email' });
+    const code = await createDbActivationCode(email, 3600_000);
     return res.json({ email, code });
   } catch(e){
     return res.status(500).json({ error:'internal_error' });

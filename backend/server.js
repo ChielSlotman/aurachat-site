@@ -1428,8 +1428,31 @@ app.get('/status', async (req,res)=>{
 app.get('/status-by-email', async (req,res)=>{
   const email = normalizeEmail(String(req.query.email||''));
   if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
+  let premiumViaToken = false;
+  if (pool) {
+    try {
+      const nowMs = Date.now();
+      const { rows } = await pool.query(`
+        SELECT t.premium, t.revoked, t.expires_at
+          FROM public.tokens t
+          LEFT JOIN public.codes c ON c.id = t.code_id
+         WHERE (LOWER(t.email) = LOWER($1))
+            OR (t.email IS NULL AND LOWER(c.note) = LOWER($1))
+      `, [email]);
+      for (const r of rows) {
+        const expires = r.expires_at ? Number(r.expires_at) : null;
+        const expired = typeof expires === 'number' && expires <= nowMs;
+        if (r.premium === true && r.revoked !== true && !expired) {
+          premiumViaToken = true;
+          break;
+        }
+      }
+    } catch (err) {
+      console.error('[status-by-email] token lookup failed', err);
+    }
+  }
   const ent = await getEntitlement(email);
-  return res.json({ premium: ent.entitled, email, subs: ent.subs });
+  return res.json({ premium: ent.entitled || premiumViaToken, email, subs: ent.subs, sources: { token: premiumViaToken, stripe: ent.entitled } });
 });
 
 // --- Regenerate code for a customer (admin protected) ---

@@ -1644,11 +1644,35 @@ app.post('/admin/grant-license', async (req, res) => {
           VALUES ($1, $2, true, NOW())
           ON CONFLICT (email) DO UPDATE SET plan=EXCLUDED.plan, active=true, activated_at=NOW()
         `, [email, plan]);
+        // Before creating a new code, check for an existing active code for this email
+        // and mark it inactive so we don't hit the unique index on (note) WHERE status='active'.
+        let replacedOldCode = null;
+        try {
+          if (pool && email) {
+            const { rows: existing } = await pool.query('SELECT id, code FROM public.codes WHERE note=$1 AND status=\'active\' LIMIT 1', [email]);
+            if (existing && existing[0]) {
+              const old = existing[0];
+              replacedOldCode = old.code || null;
+              await pool.query('UPDATE public.codes SET redeemed=TRUE, redeemed_at=$1, status=\'revoked\', revoked_at=NOW(), expires_at=NOW() WHERE id=$2', [Date.now(), old.id]);
+              console.info({ email, oldCode: replacedOldCode }, 'admin/grant-license revoked existing active code');
+            }
+          }
+        } catch (e) {
+          console.warn('admin/grant-license pre-revoke failed', e && e.message ? e.message : e);
+        }
+
         const [code] = await dbCreateCodes(1, email);
+        if (replacedOldCode) console.info({ email, oldCode: replacedOldCode, newCode: code }, 'admin/grant-license replaced existing code with new code');
         return res.json({ ok: true, code });
       } catch (e) {
         lastErr = e;
         const msg = String(e?.message || e).toLowerCase();
+        // If the error is a duplicate key on the active-code unique index for this email,
+        // don't retry — it's a logical conflict, not a transient DB error.
+        if (e && e.code === '23505' && String(e?.message || '').toLowerCase().includes('codes_active_unique')) {
+          console.warn('admin/grant-license duplicate active-code for email, aborting retries', { email });
+          break;
+        }
         // retry on transient network errors
         if (attempt < maxAttempts && (msg.includes('etimedout') || msg.includes('econnrefused') || String(e?.code||'').toLowerCase().includes('etimedout') || String(e?.code||'').toLowerCase().includes('econnrefused') || e?.name === 'AggregateError')) {
           const delay = 200 * Math.pow(2, attempt-1);

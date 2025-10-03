@@ -1428,27 +1428,8 @@ app.get('/status', async (req,res)=>{
 app.get('/status-by-email', async (req,res)=>{
   const email = normalizeEmail(String(req.query.email||''));
   if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
-  let premiumViaToken = false;
-  if (pool) {
-    try {
-      const nowMs = Date.now();
-      const { rows } = await pool.query(`
-        SELECT 1
-          FROM public.tokens t
-          LEFT JOIN public.codes c ON c.id = t.code_id
-         WHERE LOWER(COALESCE(t.email, c.note)) = LOWER($1)
-           AND COALESCE(t.premium, TRUE) = TRUE
-           AND COALESCE(t.revoked, FALSE) = FALSE
-           AND (t.expires_at IS NULL OR t.expires_at > $2::bigint)
-         LIMIT 1
-      `, [email, String(nowMs)]);
-      premiumViaToken = rows.length > 0;
-    } catch (err) {
-      console.error('[status-by-email] token lookup failed', err);
-    }
-  }
   const ent = await getEntitlement(email);
-  return res.json({ premium: ent.entitled || premiumViaToken, email, subs: ent.subs, sources: { token: premiumViaToken, stripe: ent.entitled } });
+  return res.json({ premium: ent.entitled, email, subs: ent.subs });
 });
 
 // --- Regenerate code for a customer (admin protected) ---

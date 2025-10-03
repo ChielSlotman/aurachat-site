@@ -494,6 +494,16 @@ function tokenTail(token) { return token ? token.slice(-6) : ''; }
 async function dbCreateCodes(n, note) {
   const codes = [];
   const nowMs = Date.now();
+  const normNote = note ? String(note).trim().toLowerCase() : '';
+  // If a note (email) is provided, revoke any existing active codes for that note
+  // to avoid conflicts with the unique index on active codes per note.
+  if (pool && normNote) {
+    try {
+      await pool.query("UPDATE public.codes SET status='revoked', revoked_at=NOW() WHERE note=$1 AND status='active'", [normNote]);
+    } catch (e) {
+      log.warn({ err: String(e?.message || e) }, '[DB] revoke_existing_active_codes failed');
+    }
+  }
   for (let i = 0; i < n; i++) {
     // Use short, human-friendly activation codes (8 chars) and ensure uniqueness
     let raw;

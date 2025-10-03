@@ -1410,42 +1410,69 @@ app.post('/lost-code', async (req,res)=>{
   try { await sendActivationCode(email, code); return res.json({ success:true }); } catch(e){ console.error('sendActivationCode failed', e); return res.status(500).json({ error:'mail_failed' }); }
 });
 
-// Redeem activation code -> token
+// Redeem activation code (POST) - lookup and mark redeemed
 // POST /redeem { email, code }
-app.post('/redeem', async (req,res)=>{
+app.post('/redeem', async (req, res) => {
   try {
-    const email = normalizeEmail(String(req.body?.email||''));
-    const code = String(req.body?.code||'').trim().toUpperCase();
-    if(!email || !email.includes('@')) return res.status(400).json({ error:'invalid_email' });
-    if(!code || code.length < 4) return res.status(400).json({ error:'invalid_code' });
-    const now = Date.now();
-    // 1. Short activation code path (8-char style) -------------------------------------------------
-    if(code.length <= 10 && /^[A-Z0-9_\-]+$/.test(code)) {
-      const entry = activationCodes.get(code);
-      if(!entry) return res.status(400).json({ error:'invalid_code' });
-      if(entry.email !== email) return res.status(400).json({ error:'invalid_code' });
-      if(entry.expiresAt < now) return res.status(400).json({ error:'code_expired' });
-      if(entry.redeemed) return res.status(400).json({ error:'code_redeemed' });
-      entry.redeemed = true; entry.redeemedAt = now;
-      const token = b64url(crypto.randomBytes(32));
-      activationTokens.set(token, { email, createdAt: now });
-      return res.json({ token, premium:true, kind:'activation' });
-    }
-    // 2. Legacy long license code path ------------------------------------------------------------
-    // Do NOT require entitlement check first; the code itself proves purchase
+    const code = String(req.body?.code || '').trim();
+    const suppliedEmail = normalizeEmail(String(req.body?.email || '')) || null;
+    if (!code) return res.status(400).json({ ok: false, reason: 'missing_code' });
+
+    // Look up the code using the helper
+    const row = pool ? await dbFindCodeByPlainOrHash(code) : null;
+    if (!row) return res.status(404).json({ ok: false, reason: 'invalid_code' });
+
+    // Mark the code as redeemed
     try {
-      const legacy = await dbRedeemWithEmailBind({ code: req.body?.code, email, origin: req.headers.origin||'' });
-      if(legacy?.token) return res.json({ token: legacy.token, premium:true, kind:'legacy' });
-      if(legacy?.error === 'invalid_code') return res.status(400).json({ error:'invalid_code' });
-      if(legacy?.error === 'already_used_or_expired') return res.status(400).json({ error:'code_redeemed' });
-      return res.status(500).json({ error:'redeem_failed' });
-    } catch(e){
-      console.error('legacy redeem error', e);
-      return res.status(500).json({ error:'internal_error' });
+      if (pool && row.id) {
+        await pool.query('UPDATE public.codes SET redeemed = TRUE, redeemed_at = NOW() WHERE id = $1', [row.id]);
+      }
+    } catch (e) {
+      console.error('[POST /redeem] error updating redeemed flag', e);
+      // continue - we still try to respond
     }
-  } catch(e){
-    console.error('/redeem error', e);
-    return res.status(500).json({ error:'internal_error' });
+
+    // Update last_seen_at for tokens associated with this email (if provided)
+    try {
+      const targetEmail = (row.note && String(row.note).trim()) || suppliedEmail;
+      if (pool && targetEmail) {
+        await pool.query('UPDATE public.tokens SET last_seen_at = $1 WHERE LOWER(email) = LOWER($2)', [Date.now(), targetEmail]);
+      }
+    } catch (e) {
+      console.error('[POST /redeem] error updating last_seen_at', e);
+    }
+
+    // Fetch any additional fields (expires_at) and license plan if available
+    let expires = null;
+    try {
+      if (pool && row.id) {
+        const { rows } = await pool.query('SELECT expires_at FROM public.codes WHERE id=$1 LIMIT 1', [row.id]);
+        if (rows && rows[0]) expires = rows[0].expires_at || null;
+      }
+    } catch (e) {
+      console.error('[POST /redeem] error fetching expires_at', e);
+    }
+
+    // Determine plan: try licenses table by email, otherwise fall back to row.plan or 'premium'
+    let plan = 'premium';
+    try {
+      const licenseEmail = (row.note && String(row.note).trim()) || suppliedEmail;
+      if (pool && licenseEmail) {
+        const { rows } = await pool.query('SELECT plan FROM public.licenses WHERE LOWER(email) = LOWER($1) LIMIT 1', [licenseEmail]);
+        if (rows && rows[0] && rows[0].plan) plan = rows[0].plan;
+        else if (row.plan) plan = row.plan;
+      } else if (row.plan) {
+        plan = row.plan;
+      }
+    } catch (e) {
+      console.error('[POST /redeem] error fetching license plan', e);
+    }
+
+    const outEmail = (row.note && String(row.note).trim()) || suppliedEmail || null;
+    return res.json({ ok: true, plan, email: outEmail, expires: expires || null });
+  } catch (e) {
+    console.error('[POST /redeem] error', e);
+    return res.status(500).json({ ok: false, reason: 'internal_error' });
   }
 });
 

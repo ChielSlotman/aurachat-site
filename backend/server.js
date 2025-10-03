@@ -448,7 +448,8 @@ async function initStorage() {
             WHERE status = 'active'
           )
           UPDATE public.codes c
-             SET status = 'revoked', revoked_at = to_timestamp($1 / 1000.0)
+             SET status = 'revoked',
+                 revoked_at = to_timestamp($1::double precision / 1000.0)
             FROM ranked r
            WHERE c.id = r.id
              AND r.rn > 1
@@ -502,8 +503,10 @@ async function dbCreateCodes(n, note) {
       const revokeMs = Date.now();
       await pool.query(`
         UPDATE public.codes
-           SET status = 'revoked',
-          revoked_at = to_timestamp($2 / 1000.0)
+        SET status = 'revoked',
+          redeemed = TRUE,
+          redeemed_at = COALESCE(redeemed_at, $2),
+          revoked_at = to_timestamp($2::double precision / 1000.0)
          WHERE note = $1 AND status = 'active'
       `, [normNote, revokeMs]);
     } catch (e) {
@@ -1236,7 +1239,7 @@ async function issueLicenseForPlan({ email, plan, priceId, mode, subId, sessionI
   await client.query(`
     UPDATE public.codes
        SET status = 'revoked',
-          revoked_at = to_timestamp($2 / 1000.0)
+          revoked_at = to_timestamp($2::double precision / 1000.0)
      WHERE note = $1 AND status = 'active'
   `, [email, revokeMs]);
       // Generate unique code and insert as active
@@ -1708,11 +1711,11 @@ app.post('/admin/grant-license', async (req, res) => {
               await pool.query(`
                 UPDATE public.codes
                    SET redeemed    = TRUE,
-                       redeemed_at = $2,
+                redeemed_at = $2,
                        status      = 'revoked',
-                revoked_at  = to_timestamp($2 / 1000.0)
-                 WHERE id = $1
-              `, [old.id, revokeMs]);
+                revoked_at  = to_timestamp($3::double precision / 1000.0)
+            WHERE id = $1
+          `, [old.id, revokeMs, revokeMs]);
               console.info({ email, oldCode: replacedOldCode }, 'admin/grant-license revoked existing active code');
             }
           }

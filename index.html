@@ -135,15 +135,17 @@
     </section>
     <section class="video-section" aria-label="AuraSync extension demo video">
       <div class="container container--wide">
-        <div class="video-embed video-embed--hero">
+        <div class="video-embed video-embed--hero" data-video-embed>
           <iframe
             width="1280"
             height="720"
-            src="https://www.youtube.com/embed/GxHQcMnsfIg?autoplay=1&amp;mute=1&amp;rel=0&amp;modestbranding=1&amp;playsinline=1"
             title="AuraSync Extension Overview"
-            loading="eager"
+            loading="lazy"
             allow="autoplay; accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowfullscreen>
+            allowfullscreen
+            referrerpolicy="strict-origin-when-cross-origin"
+            src="about:blank"
+            data-src="https://www.youtube.com/embed/GxHQcMnsfIg?autoplay=1&amp;mute=1&amp;rel=0&amp;modestbranding=1&amp;playsinline=1">
           </iframe>
         </div>
       </div>
@@ -246,6 +248,33 @@
       };
       // Run after a short delay to ensure base assignments applied
       setTimeout(pinPriority, 250);
+    })();
+
+    (function(){
+      const section = document.querySelector('.video-section');
+      if(!section) return;
+      const frame = section.querySelector('iframe[data-src]');
+      let observer;
+      const reveal = () => {
+        section.classList.add('is-visible');
+        if(frame && !frame.dataset.loaded && frame.dataset.src){
+          frame.src = frame.dataset.src;
+          frame.dataset.loaded = 'true';
+        }
+        if(observer) observer.disconnect();
+      };
+      if('IntersectionObserver' in window){
+        observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if(entry.isIntersecting){
+              reveal();
+            }
+          });
+        }, {threshold:0.45});
+        observer.observe(section);
+      }else{
+        reveal();
+      }
     })();
   </script>
   <script src="/config.js" defer></script>

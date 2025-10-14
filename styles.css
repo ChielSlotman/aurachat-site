@@ -79,9 +79,12 @@ header.nav .links .btn{margin-left:0}
 .manage-cta a{color:#c7d2fe; text-decoration:underline; text-decoration-color:rgba(124,58,237,.55)}
 .manage-cta a:hover{color:#e0e7ff}
 .manage-cta a:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:3px; border-radius:.4rem}
-.extension-install{margin-top:1.5rem; text-align:center}
+.extension-install{margin:2.5rem auto 2rem; text-align:center}
 .extension-install .btn-extension{display:inline-flex; justify-content:center; min-width:240px}
 .manage-link{margin-top:1rem; text-align:center; color:var(--muted); font-size:.95rem}
+.summary-link{margin-left:.5rem; font-size:.85rem; color:#c7d2fe; text-decoration:underline; text-decoration-color:rgba(124,58,237,.55)}
+.summary-link:hover{color:#e0e7ff}
+.summary-link:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:3px; border-radius:.4rem}
 .manage-link a{color:#c7d2fe; text-decoration:underline; text-decoration-color:rgba(124,58,237,.55)}
 .manage-link a:hover{color:#e0e7ff}
 .manage-link a:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:3px; border-radius:.4rem}

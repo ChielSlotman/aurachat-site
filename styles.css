@@ -159,8 +159,8 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
   /* Keep float animation enabled */
 }
 /* Video */
-.video-section{padding:1.65rem 0 1.65rem; margin-top:-6.1rem; position:relative; z-index:1; opacity:0; visibility:hidden; transform:translateY(80px); transition:opacity .55s ease, transform .55s ease; pointer-events:none}
-.video-section::before{content:""; position:absolute; top:0; left:0; right:0; height:160px; background:linear-gradient(180deg, rgba(11,12,18,0), rgba(11,12,18,1)); pointer-events:none; opacity:.7;}
+.video-section{padding:1.4rem 0 1.6rem; margin-top:-7.4rem; position:relative; z-index:1; opacity:0; visibility:hidden; transform:translateY(80px); transition:opacity .55s ease, transform .55s ease; pointer-events:none}
+.video-section::before{content:""; position:absolute; top:0; left:0; right:0; height:180px; background:linear-gradient(180deg, rgba(11,12,18,0), rgba(11,12,18,1)); pointer-events:none; opacity:.72;}
 .video-section.is-visible{opacity:1; visibility:visible; transform:translateY(0); pointer-events:auto}
 .video-section .container{display:flex; justify-content:center}
 .container--wide{max-width:1280px}

@@ -47,7 +47,6 @@ header.nav .links a{color:var(--muted); text-decoration:none; font-weight:600}
 header.nav .links a:hover{color:#fff}
 header.nav .links a.active{color:#fff}
 header.nav .links{display:flex; align-items:center; gap:1.25rem}
-header.nav .links .btn{margin-left:.5rem}
 header.nav .logo{display:flex; align-items:center; gap:.5rem}
 header.nav .logo span{font-weight:800}
 /* White brand text when not using gradient */
@@ -56,6 +55,11 @@ header.nav .logo .brand{color:#fff; font-weight:800; font-size:1.15rem; letter-s
 .brand-grad{background:linear-gradient(90deg,var(--primary),var(--primary-2),var(--primary-3)); -webkit-background-clip:text; background-clip:text; color:transparent}
 /* Stronger header brand appearance */
 header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:.2px; text-shadow:0 0 10px rgba(124,58,237,.25)}
+header.nav .links .nav-install{padding:.55rem .95rem; border-color:rgba(124,58,237,.28); background:rgba(124,58,237,.12); box-shadow:0 0 0 rgba(0,0,0,0); transition:background .25s ease, box-shadow .25s ease}
+header.nav .links .nav-install:hover{background:rgba(124,58,237,.2); box-shadow:0 10px 24px rgba(124,58,237,.25)}
+header.nav .links .nav-install:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:2px}
+header.nav .links .nav-premium{padding:.55rem .95rem; color:#fff}
+header.nav .links .btn{margin-left:0}
 /* Buttons */
 .btn{display:inline-flex; align-items:center; justify-content:center; padding:.8rem 1.1rem; border-radius:.75rem; font-weight:700; text-decoration:none; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:#fff}
 .btn-primary{background:linear-gradient(90deg,var(--primary),var(--primary-2)); color:#fff; border:none; background-clip:padding-box; box-shadow:0 8px 24px rgba(124,58,237,.28)}
@@ -68,6 +72,11 @@ header.nav .logo .brand-grad{font-weight:800; font-size:1.15rem; letter-spacing:
 .headline .brand{background:linear-gradient(90deg,var(--primary),var(--primary-2),var(--primary-3)); -webkit-background-clip:text; background-clip:text; color:transparent}
 .sub{color:var(--muted); margin-top:1rem; max-width:46ch}
 .cta{display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.25rem}
+.btn-extension{border-color:rgba(124,58,237,.3); background:rgba(124,58,237,.12); box-shadow:0 10px 30px rgba(124,58,237,.22)}
+.btn-extension:hover{background:rgba(124,58,237,.18)}
+.btn-extension:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:3px}
+.extension-install{margin-top:1.5rem; text-align:center}
+.extension-install .btn-extension{display:inline-flex; justify-content:center; min-width:240px}
 /* Subtle hint text for extension easter egg */
 .hint-extension{color:#9aa4b2; font-size:.9rem; opacity:.9}
 /* Art blobs */

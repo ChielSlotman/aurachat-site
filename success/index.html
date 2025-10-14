@@ -35,7 +35,7 @@
             </div>
             <div class="mt-6 flex flex-wrap gap-3">
               <a href="https://chromewebstore.google.com/detail/elkmbgiaokolgjjglikpfmkanlpfpedi" class="btn-secondary px-4 py-2 rounded-lg" target="_blank" rel="noopener">Open the extension</a>
-              <button id="open-portal" class="btn-secondary px-4 py-2 rounded-lg">Manage billing</button>
+              <a href="https://billing.stripe.com/p/login/eVq3co9BA8cwbmfaKF9oc00" class="btn-secondary px-4 py-2 rounded-lg" target="_blank" rel="noopener">Manage subscription</a>
             </div>
           </div>
           <div id="error" class="hidden mt-6">
@@ -105,11 +105,6 @@ async function activate(){
 activate();
 el('copy')?.addEventListener('click',()=>{const i=el('code');i.select();document.execCommand('copy');});
 el('retry')?.addEventListener('click', activate);
-el('open-portal')?.addEventListener('click', async()=>{
-  const customer_id = window.localStorage.getItem('stripe_customer_id')||'';
-  if(!customer_id){alert('Use your Stripe receipt to manage billing.');return;}
-  try{const r=await fetch('https://api.aurasync.info/billing-portal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id})});const d=await r.json();if(d?.url){window.location.href=d.url}else alert('Portal unavailable')}catch{alert('Portal unavailable')}
-});
 </script>
 </body>
 </html>

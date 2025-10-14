@@ -75,8 +75,16 @@ header.nav .links .btn{margin-left:0}
 .btn-extension{border-color:rgba(124,58,237,.3); background:rgba(124,58,237,.12); box-shadow:0 10px 30px rgba(124,58,237,.22)}
 .btn-extension:hover{background:rgba(124,58,237,.18)}
 .btn-extension:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:3px}
+.manage-cta{margin-top:.75rem; font-size:.9rem; color:var(--muted)}
+.manage-cta a{color:#c7d2fe; text-decoration:underline; text-decoration-color:rgba(124,58,237,.55)}
+.manage-cta a:hover{color:#e0e7ff}
+.manage-cta a:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:3px; border-radius:.4rem}
 .extension-install{margin-top:1.5rem; text-align:center}
 .extension-install .btn-extension{display:inline-flex; justify-content:center; min-width:240px}
+.manage-link{margin-top:1rem; text-align:center; color:var(--muted); font-size:.95rem}
+.manage-link a{color:#c7d2fe; text-decoration:underline; text-decoration-color:rgba(124,58,237,.55)}
+.manage-link a:hover{color:#e0e7ff}
+.manage-link a:focus-visible{outline:2px solid rgba(124,58,237,.55); outline-offset:3px; border-radius:.4rem}
 /* Subtle hint text for extension easter egg */
 .hint-extension{color:#9aa4b2; font-size:.9rem; opacity:.9}
 /* Art blobs */
